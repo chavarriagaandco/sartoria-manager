@@ -18,13 +18,14 @@ type ClientRecord = {
   email?: string;
   notes?: string;
   note?: string;
-  chest?: number | string;
-  waist?: number | string;
-  hip?: number | string;
-  shoulder?: number | string;
-  sleeve?: number | string;
-  rise?: number | string;
-  inseam?: number | string;
+  chest?: string;
+  waist?: string;
+  hip?: string;
+  shoulder?: string;
+  sleeve?: string;
+  neck?: string;
+  inseam?: string;
+  outseam?: string;
   [key: string]: unknown;
 };
 
@@ -60,8 +61,9 @@ type FormState = {
   hip: string;
   shoulder: string;
   sleeve: string;
-  rise: string;
+  neck: string;
   inseam: string;
+  outseam: string;
 };
 
 const initialForm: FormState = {
@@ -75,8 +77,9 @@ const initialForm: FormState = {
   hip: "",
   shoulder: "",
   sleeve: "",
-  rise: "",
+  neck: "",
   inseam: "",
+  outseam: "",
 };
 
 const todayTasksDefault = [
@@ -93,9 +96,7 @@ function euro(value: number) {
 }
 
 function getClientName(client: ClientRecord) {
-  return (
-    String(client.name || client.full_name || client.nome || "Nuovo cliente")
-  );
+  return String(client.name || client.full_name || client.nome || "Nuovo cliente");
 }
 
 function getClientCity(client: ClientRecord) {
@@ -114,16 +115,10 @@ function getClientNotes(client: ClientRecord) {
   return String(client.notes || client.note || "");
 }
 
-function getMeasure(client: ClientRecord, key: keyof FormState) {
+function getMeasure(client: ClientRecord, key: keyof ClientRecord) {
   const value = client[key];
   if (value === null || value === undefined) return "";
   return String(value);
-}
-
-function parseNumberOrNull(value: string) {
-  if (!value.trim()) return null;
-  const parsed = Number(value.replace(",", "."));
-  return Number.isNaN(parsed) ? null : parsed;
 }
 
 function isOrderOpen(order: OrderRecord) {
@@ -174,7 +169,6 @@ export default function Page() {
       return;
     }
     void loadAllData(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase]);
 
   async function loadAllData(showSoftError: boolean) {
@@ -199,7 +193,7 @@ export default function Page() {
           setClients((clientsRes.value.data as ClientRecord[]) || []);
         }
       } else {
-        nextErrors.push("clients: load failed");
+        nextErrors.push("clients: Load failed");
       }
 
       if (ordersRes.status === "fulfilled") {
@@ -209,7 +203,7 @@ export default function Page() {
           setOrders((ordersRes.value.data as OrderRecord[]) || []);
         }
       } else {
-        nextErrors.push("orders: load failed");
+        nextErrors.push("orders: Load failed");
       }
 
       if (quotesRes.status === "fulfilled") {
@@ -219,7 +213,7 @@ export default function Page() {
           setQuotes((quotesRes.value.data as QuoteRecord[]) || []);
         }
       } else {
-        nextErrors.push("quotes: load failed");
+        nextErrors.push("quotes: Load failed");
       }
 
       if (nextErrors.length === 3) {
@@ -228,8 +222,7 @@ export default function Page() {
         setError("");
       }
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Caricamento non riuscito.";
+      const message = err instanceof Error ? err.message : "Caricamento non riuscito.";
       setError(`Errore: ${message}`);
     } finally {
       setLoading(false);
@@ -256,8 +249,9 @@ export default function Page() {
       hip: getMeasure(client, "hip"),
       shoulder: getMeasure(client, "shoulder"),
       sleeve: getMeasure(client, "sleeve"),
-      rise: getMeasure(client, "rise"),
+      neck: getMeasure(client, "neck"),
       inseam: getMeasure(client, "inseam"),
+      outseam: getMeasure(client, "outseam"),
     });
     setShowClientEditor(true);
     setActiveTab("clienti");
@@ -269,27 +263,23 @@ export default function Page() {
       return;
     }
 
-    if (!form.name.trim()) {
-      setError("Inserisci almeno il nome del cliente.");
-      return;
-    }
-
     setSavingClient(true);
     setError("");
 
     const payload = {
-      name: form.name.trim(),
+      name: form.name.trim() || "Cliente senza nome",
       city: form.city.trim() || null,
       phone: form.phone.trim() || null,
       email: form.email.trim() || null,
       notes: form.notes.trim() || null,
-      chest: parseNumberOrNull(form.chest),
-      waist: parseNumberOrNull(form.waist),
-      hip: parseNumberOrNull(form.hip),
-      shoulder: parseNumberOrNull(form.shoulder),
-      sleeve: parseNumberOrNull(form.sleeve),
-      rise: parseNumberOrNull(form.rise),
-      inseam: parseNumberOrNull(form.inseam),
+      chest: form.chest.trim() || null,
+      waist: form.waist.trim() || null,
+      hip: form.hip.trim() || null,
+      shoulder: form.shoulder.trim() || null,
+      sleeve: form.sleeve.trim() || null,
+      neck: form.neck.trim() || null,
+      inseam: form.inseam.trim() || null,
+      outseam: form.outseam.trim() || null,
     };
 
     try {
@@ -311,18 +301,19 @@ export default function Page() {
       }
 
       if (result.error) {
-        throw result.error;
+        console.error("Supabase save client error:", result.error);
+        throw new Error(result.error.message);
       }
 
       await loadAllData(true);
+
       if (result.data) {
         openClient(result.data as ClientRecord);
       } else {
         setShowClientEditor(false);
       }
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Salvataggio non riuscito.";
+      const message = err instanceof Error ? err.message : "Salvataggio non riuscito.";
       setError(`Errore: ${message}`);
     } finally {
       setSavingClient(false);
@@ -341,12 +332,11 @@ export default function Page() {
     const value = Number(order.total ?? order.amount ?? order.value ?? 0);
     return sum + (Number.isFinite(value) ? value : 0);
   }, 0);
+
   const totalDeposits = orders.reduce((sum, order) => {
     const value = Number(order.acconto ?? order.deposit ?? 0);
     return sum + (Number.isFinite(value) ? value : 0);
   }, 0);
-
-  const desktopTwoCols = !isMobile;
 
   const styles = {
     page: {
@@ -466,7 +456,7 @@ export default function Page() {
     } as const,
     sectionGrid: {
       display: "grid",
-      gridTemplateColumns: desktopTwoCols ? "1.15fr 0.85fr" : "1fr",
+      gridTemplateColumns: isMobile ? "1fr" : "1.15fr 0.85fr",
       gap: 20,
       alignItems: "start",
     } as const,
@@ -563,9 +553,6 @@ export default function Page() {
       fontSize: 14,
       color: "#8a847d",
     } as const,
-    dividerSpace: {
-      height: 12,
-    } as const,
   };
 
   function renderDashboard() {
@@ -593,6 +580,7 @@ export default function Page() {
 
         <div style={styles.panel}>
           <h2 style={styles.panelTitle}>Focus di oggi</h2>
+
           <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
             <input
               style={styles.input}
@@ -626,9 +614,7 @@ export default function Page() {
               >
                 <span>{task}</span>
                 <button
-                  onClick={() =>
-                    setTasks((prev) => prev.filter((_, i) => i !== idx))
-                  }
+                  onClick={() => setTasks((prev) => prev.filter((_, i) => i !== idx))}
                   style={{
                     border: "none",
                     background: "transparent",
@@ -651,6 +637,7 @@ export default function Page() {
     return (
       <div style={styles.panel}>
         <h2 style={styles.panelTitle}>Scheda cliente</h2>
+
         {!showClientEditor && !selectedClient ? (
           <div style={styles.muted}>Seleziona un cliente.</div>
         ) : (
@@ -707,11 +694,9 @@ export default function Page() {
               />
             </div>
 
-            <div style={styles.dividerSpace} />
-
             <h3
               style={{
-                margin: "0 0 14px 0",
+                margin: "8px 0 14px 0",
                 fontSize: 18,
                 letterSpacing: "0.22em",
                 textTransform: "uppercase",
@@ -728,8 +713,9 @@ export default function Page() {
                 ["hip", "Hip"],
                 ["shoulder", "Shoulder"],
                 ["sleeve", "Sleeve"],
-                ["rise", "Rise"],
+                ["neck", "Neck"],
                 ["inseam", "Inseam"],
+                ["outseam", "Outseam"],
               ].map(([key, label]) => (
                 <div key={key} style={styles.fieldBlock}>
                   <label style={styles.label}>{label}</label>
@@ -768,24 +754,15 @@ export default function Page() {
                 {savingClient ? "Salvataggio..." : "Salva cliente"}
               </button>
 
-              {(showClientEditor || selectedClient) && (
-                <button
-                  style={{
-                    ...styles.button,
-                    width: isMobile ? "100%" : "auto",
-                  }}
-                  onClick={() => {
-                    setShowClientEditor(false);
-                    if (selectedClient) {
-                      openClient(selectedClient);
-                    } else {
-                      setForm(initialForm);
-                    }
-                  }}
-                >
-                  Chiudi
-                </button>
-              )}
+              <button
+                style={{
+                  ...styles.button,
+                  width: isMobile ? "100%" : "auto",
+                }}
+                onClick={() => setShowClientEditor(false)}
+              >
+                Chiudi
+              </button>
             </div>
           </>
         )}
@@ -891,16 +868,10 @@ export default function Page() {
         <div style={styles.titleRow}>
           <div>
             <h1 style={styles.h1}>Sartoria Manager</h1>
-            <div style={styles.subtitle}>
-              Versione premium sincronizzata con Supabase.
-            </div>
+            <div style={styles.subtitle}>Versione premium sincronizzata con Supabase.</div>
           </div>
 
-          <button
-            style={styles.button}
-            onClick={() => void loadAllData(true)}
-            disabled={loading}
-          >
+          <button style={styles.button} onClick={() => void loadAllData(true)} disabled={loading}>
             {loading ? "Caricamento..." : "Ricarica dati"}
           </button>
         </div>
@@ -955,9 +926,10 @@ export default function Page() {
             clients.map((client) => ({
               title: getClientName(client),
               meta: [
-                form.chest && `Chest ${getMeasure(client, "chest")}`,
-                form.waist && `Waist ${getMeasure(client, "waist")}`,
-                form.hip && `Hip ${getMeasure(client, "hip")}`,
+                client.chest ? `Chest ${client.chest}` : "",
+                client.waist ? `Waist ${client.waist}` : "",
+                client.hip ? `Hip ${client.hip}` : "",
+                client.outseam ? `Outseam ${client.outseam}` : "",
               ]
                 .filter(Boolean)
                 .join(" · "),
@@ -976,9 +948,7 @@ export default function Page() {
             "Preventivi",
             quotes.map((quote, idx) => ({
               title: `Preventivo #${String(quote.id ?? idx + 1)}`,
-              meta: `Valore: ${euro(
-                Number(quote.total ?? quote.amount ?? quote.value ?? 0)
-              )}`,
+              meta: `Valore: ${euro(Number(quote.total ?? quote.amount ?? quote.value ?? 0))}`,
             }))
           )}
       </div>
