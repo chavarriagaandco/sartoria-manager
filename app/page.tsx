@@ -1,975 +1,987 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+type TabKey = "dashboard" | "clienti" | "misure" | "ordini" | "preventivi";
 
-type View = "dashboard" | "clienti" | "misure" | "ordini" | "preventivi";
+type ClientRecord = {
+  id?: string | number;
+  created_at?: string;
+  name?: string;
+  full_name?: string;
+  nome?: string;
+  city?: string;
+  citta?: string;
+  phone?: string;
+  telefono?: string;
+  email?: string;
+  notes?: string;
+  note?: string;
+  chest?: number | string;
+  waist?: number | string;
+  hip?: number | string;
+  shoulder?: number | string;
+  sleeve?: number | string;
+  rise?: number | string;
+  inseam?: number | string;
+  [key: string]: unknown;
+};
 
-type Client = {
-  id: string;
+type OrderRecord = {
+  id?: string | number;
+  created_at?: string;
+  status?: string;
+  total?: number;
+  amount?: number;
+  value?: number;
+  acconto?: number;
+  deposit?: number;
+  [key: string]: unknown;
+};
+
+type QuoteRecord = {
+  id?: string | number;
+  created_at?: string;
+  total?: number;
+  amount?: number;
+  value?: number;
+  [key: string]: unknown;
+};
+
+type FormState = {
   name: string;
-  phone: string | null;
-  email: string | null;
-  city: string | null;
-  notes: string | null;
-  chest: string | null;
-  waist: string | null;
-  hip: string | null;
-  shoulder: string | null;
-  sleeve: string | null;
-  neck: string | null;
-  inseam: string | null;
-  outseam: string | null;
-  created_at?: string;
+  city: string;
+  phone: string;
+  email: string;
+  notes: string;
+  chest: string;
+  waist: string;
+  hip: string;
+  shoulder: string;
+  sleeve: string;
+  rise: string;
+  inseam: string;
 };
 
-type Order = {
-  id: string;
-  client_id: string;
-  garment: string | null;
-  construction: string | null;
-  status: string | null;
-  price: number | null;
-  advance: number | null;
-  notes: string | null;
-  due_date: string | null;
-  created_at?: string;
-};
-
-type Quote = {
-  id: string;
-  client_id: string;
-  garment: string | null;
-  description: string | null;
-  base_price: number | null;
-  extras: number | null;
-  deposit: number | null;
-  total: number | null;
-  status: string | null;
-  created_at?: string;
-};
-
-type OrderReference = {
-  id: string;
-  order_id: string;
-  type: string | null;
-  url: string | null;
-  note: string | null;
-  stage: string | null;
-  created_at?: string;
-};
-
-const bg = "#f2f1ed";
-const card = "#fbfaf8";
-const border = "#ded8cf";
-const text = "#1a1a1a";
-const muted = "#6b6660";
-
-const orderStatuses = ["Preventivo", "In lavorazione", "Prova", "Consegnato"];
-const quoteStatuses = ["Bozza", "Approvato", "Convertito"];
-const referenceTypes = ["image", "link", "note"];
-const referenceStages = ["idea", "fabric", "fitting", "final"];
-
-const emptyClient = {
+const initialForm: FormState = {
   name: "",
+  city: "",
   phone: "",
   email: "",
-  city: "",
   notes: "",
   chest: "",
   waist: "",
   hip: "",
   shoulder: "",
   sleeve: "",
-  neck: "",
+  rise: "",
   inseam: "",
-  outseam: "",
 };
 
-const emptyOrder = {
-  client_id: "",
-  garment: "",
-  construction: "Su misura",
-  status: "Preventivo",
-  price: "",
-  advance: "",
-  notes: "",
-  due_date: "",
-};
+const todayTasksDefault = [
+  "Controllare gli ordini in stato Prova",
+  "Registrare gli acconti ricevuti",
+];
 
-const emptyQuote = {
-  client_id: "",
-  garment: "",
-  description: "",
-  base_price: "",
-  extras: "",
-  deposit: "",
-  status: "Bozza",
-};
-
-const emptyReference = {
-  type: "image",
-  url: "",
-  note: "",
-  stage: "idea",
-};
-
-function money(value: number | null | undefined) {
-  return `€ ${Number(value || 0)}`;
+function euro(value: number) {
+  return new Intl.NumberFormat("it-IT", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  }).format(value || 0);
 }
 
-function flashStyle(type: "ok" | "error") {
-  return type === "error"
-    ? {
-        border: "1px solid #f0c6c6",
-        background: "#fff3f3",
-        color: "#a12626",
-      }
-    : {
-        border: "1px solid #cce6d3",
-        background: "#eef9f0",
-        color: "#23623b",
-      };
-}
-
-function badgeStyle(status: string | null | undefined): React.CSSProperties {
-  const s = status || "—";
-  const map: Record<string, string> = {
-    Preventivo: "#efefef",
-    "In lavorazione": "#fff1cc",
-    Prova: "#dcecff",
-    Consegnato: "#dff5e6",
-    Bozza: "#efefef",
-    Approvato: "#dff5e6",
-    Convertito: "#efefef",
-  };
-
-  return {
-    display: "inline-block",
-    padding: "6px 12px",
-    borderRadius: 999,
-    border: `1px solid ${border}`,
-    background: map[s] || "#efefef",
-    fontSize: 12,
-    whiteSpace: "nowrap",
-  };
-}
-
-function AppButton({
-  children,
-  onClick,
-  variant = "primary",
-  type = "button",
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-  variant?: "primary" | "secondary" | "danger";
-  type?: "button" | "submit";
-}) {
-  const styles =
-    variant === "primary"
-      ? { background: "#111", color: "#fff", border: "1px solid #111" }
-      : variant === "danger"
-      ? { background: "transparent", color: "#9f1d1d", border: "1px solid #efc7c7" }
-      : { background: "transparent", color: text, border: `1px solid ${border}` };
-
+function getClientName(client: ClientRecord) {
   return (
-    <button
-      type={type}
-      onClick={onClick}
-      style={{
-        ...styles,
-        borderRadius: 999,
-        padding: "12px 18px",
-        fontSize: 14,
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {children}
-    </button>
+    String(client.name || client.full_name || client.nome || "Nuovo cliente")
   );
 }
 
-function CardShell({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        background: card,
-        border: `1px solid ${border}`,
-        borderRadius: 28,
-        padding: 24,
-        boxSizing: "border-box",
-        minWidth: 0,
-      }}
-    >
-      {children}
-    </div>
-  );
+function getClientCity(client: ClientRecord) {
+  return String(client.city || client.citta || "");
 }
 
-function TabButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "10px 16px",
-        borderRadius: 999,
-        border: `1px solid ${border}`,
-        background: active ? "#111" : card,
-        color: active ? "#fff" : muted,
-        cursor: "pointer",
-        fontSize: 14,
-      }}
-    >
-      {children}
-    </button>
-  );
+function getClientPhone(client: ClientRecord) {
+  return String(client.phone || client.telefono || "");
 }
 
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-}: {
-  label: string;
-  value: string | number | null | undefined;
-  onChange: (value: string) => void;
-  placeholder?: string;
-  type?: string;
-}) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
-      <label style={{ fontSize: 12, color: "#7a756f" }}>{label}</label>
-      <input
-        type={type}
-        value={value ?? ""}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          width: "100%",
-          boxSizing: "border-box",
-          border: "none",
-          borderBottom: `1px solid ${border}`,
-          background: "transparent",
-          padding: "8px 0",
-          fontSize: 16,
-          outline: "none",
-        }}
-      />
-    </div>
-  );
+function getClientEmail(client: ClientRecord) {
+  return String(client.email || "");
 }
 
-function Area({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string | null | undefined;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <label style={{ fontSize: 12, color: "#7a756f" }}>{label}</label>
-      <textarea
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          width: "100%",
-          boxSizing: "border-box",
-          minHeight: 90,
-          border: `1px solid ${border}`,
-          borderRadius: 20,
-          padding: 14,
-          resize: "vertical",
-          background: card,
-          fontSize: 15,
-          outline: "none",
-        }}
-      />
-    </div>
-  );
+function getClientNotes(client: ClientRecord) {
+  return String(client.notes || client.note || "");
 }
 
-function SelectField({
-  label,
-  value,
-  options,
-  onChange,
-  labels,
-}: {
-  label: string;
-  value: string | null | undefined;
-  options: string[];
-  onChange: (value: string) => void;
-  labels?: Record<string, string>;
-}) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
-      <label style={{ fontSize: 12, color: "#7a756f" }}>{label}</label>
-      <select
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value)}
-        style={{
-          width: "100%",
-          boxSizing: "border-box",
-          border: `1px solid ${border}`,
-          borderRadius: 999,
-          padding: "12px 16px",
-          background: "#fff",
-          fontSize: 15,
-          outline: "none",
-        }}
-      >
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {labels?.[option] || option}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
+function getMeasure(client: ClientRecord, key: keyof FormState) {
+  const value = client[key];
+  if (value === null || value === undefined) return "";
+  return String(value);
+}
+
+function parseNumberOrNull(value: string) {
+  if (!value.trim()) return null;
+  const parsed = Number(value.replace(",", "."));
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function isOrderOpen(order: OrderRecord) {
+  const status = String(order.status || "").toLowerCase();
+  if (!status) return true;
+  return !["consegnato", "chiuso", "closed", "delivered"].includes(status);
 }
 
 export default function Page() {
-  const [view, setView] = useState<View>("dashboard");
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
-  const [clients, setClients] = useState<Client[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [references, setReferences] = useState<OrderReference[]>([]);
+  const supabase: SupabaseClient | null = useMemo(() => {
+    if (!supabaseUrl || !supabaseAnonKey) return null;
+    try {
+      return createClient(supabaseUrl, supabaseAnonKey);
+    } catch {
+      return null;
+    }
+  }, [supabaseUrl, supabaseAnonKey]);
 
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
-  const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
-
-  const [clientForm, setClientForm] = useState(emptyClient);
-  const [orderForm, setOrderForm] = useState(emptyOrder);
-  const [quoteForm, setQuoteForm] = useState(emptyQuote);
-  const [referenceForm, setReferenceForm] = useState(emptyReference);
-
-  const [openClientForm, setOpenClientForm] = useState(false);
-  const [openOrderForm, setOpenOrderForm] = useState(false);
-  const [openQuoteForm, setOpenQuoteForm] = useState(false);
-  const [openReferenceForm, setOpenReferenceForm] = useState(false);
-
-  const [searchClient, setSearchClient] = useState("");
-  const [searchOrder, setSearchOrder] = useState("");
-
-  const [todoText, setTodoText] = useState("");
-  const [todos, setTodos] = useState([
-    { id: "1", text: "Controllare gli ordini in stato Prova", done: false },
-    { id: "2", text: "Registrare gli acconti ricevuti", done: false },
-  ]);
-
-  const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState<"ok" | "error">("ok");
+  const [isMobile, setIsMobile] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
   const [loading, setLoading] = useState(true);
+  const [savingClient, setSavingClient] = useState(false);
+  const [error, setError] = useState("");
+  const [clients, setClients] = useState<ClientRecord[]>([]);
+  const [orders, setOrders] = useState<OrderRecord[]>([]);
+  const [quotes, setQuotes] = useState<QuoteRecord[]>([]);
+  const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(null);
+  const [showClientEditor, setShowClientEditor] = useState(false);
+  const [clientSearch, setClientSearch] = useState("");
+  const [form, setForm] = useState<FormState>(initialForm);
+  const [taskInput, setTaskInput] = useState("");
+  const [tasks, setTasks] = useState<string[]>(todayTasksDefault);
 
-  const selectedClient = clients.find((c) => c.id === selectedClientId) || null;
-  const selectedOrder = orders.find((o) => o.id === selectedOrderId) || null;
-  const selectedQuote = quotes.find((q) => q.id === selectedQuoteId) || null;
-  const selectedOrderClient = selectedOrder ? clients.find((c) => c.id === selectedOrder.client_id) : null;
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 900);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
-  const selectedOrderReferences = useMemo(
-    () => references.filter((r) => r.order_id === selectedOrderId),
-    [references, selectedOrderId]
-  );
-
-  const clientOptions = clients.map((c) => c.id);
-  const clientLabels = Object.fromEntries(clients.map((c) => [c.id, c.name]));
-
-  const filteredClients = useMemo(() => {
-    return clients.filter((c) =>
-      `${c.name || ""} ${c.city || ""} ${c.email || ""}`
-        .toLowerCase()
-        .includes(searchClient.toLowerCase())
-    );
-  }, [clients, searchClient]);
-
-  const filteredOrders = useMemo(() => {
-    return orders.filter((o) =>
-      `${o.garment || ""} ${o.status || ""}`
-        .toLowerCase()
-        .includes(searchOrder.toLowerCase())
-    );
-  }, [orders, searchOrder]);
-
-  const totalOrdersValue = orders.reduce((sum, o) => sum + Number(o.price || 0), 0);
-  const totalAdvance = orders.reduce((sum, o) => sum + Number(o.advance || 0), 0);
-  const openOrders = orders.filter((o) => (o.status || "") !== "Consegnato").length;
-
-  const flash = (msg: string, type: "ok" | "error" = "ok") => {
-    setMessage(msg);
-    setMessageType(type);
-    window.setTimeout(() => setMessage(""), 2500);
-  };
-
-  const loadAll = async () => {
-    setLoading(true);
-
-    const [clientsRes, ordersRes, quotesRes, refsRes] = await Promise.all([
-      supabase.from("clients").select("*").order("created_at", { ascending: false }),
-      supabase.from("orders").select("*").order("created_at", { ascending: false }),
-      supabase.from("quotes").select("*").order("created_at", { ascending: false }),
-      supabase.from("order_references").select("*").order("created_at", { ascending: true }),
-    ]);
-
-    const firstError = clientsRes.error || ordersRes.error || quotesRes.error || refsRes.error;
-
-    if (firstError) {
-      flash(`Errore: ${firstError.message}`, "error");
+  useEffect(() => {
+    if (!supabase) {
       setLoading(false);
+      setError("Configurazione Supabase mancante o non valida.");
+      return;
+    }
+    void loadAllData(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase]);
+
+  async function loadAllData(showSoftError: boolean) {
+    if (!supabase) return;
+
+    setLoading(true);
+    if (!showSoftError) setError("");
+
+    try {
+      const [clientsRes, ordersRes, quotesRes] = await Promise.allSettled([
+        supabase.from("clients").select("*").order("created_at", { ascending: false }),
+        supabase.from("orders").select("*").order("created_at", { ascending: false }),
+        supabase.from("quotes").select("*").order("created_at", { ascending: false }),
+      ]);
+
+      const nextErrors: string[] = [];
+
+      if (clientsRes.status === "fulfilled") {
+        if (clientsRes.value.error) {
+          nextErrors.push(`clients: ${clientsRes.value.error.message}`);
+        } else {
+          setClients((clientsRes.value.data as ClientRecord[]) || []);
+        }
+      } else {
+        nextErrors.push("clients: load failed");
+      }
+
+      if (ordersRes.status === "fulfilled") {
+        if (ordersRes.value.error) {
+          nextErrors.push(`orders: ${ordersRes.value.error.message}`);
+        } else {
+          setOrders((ordersRes.value.data as OrderRecord[]) || []);
+        }
+      } else {
+        nextErrors.push("orders: load failed");
+      }
+
+      if (quotesRes.status === "fulfilled") {
+        if (quotesRes.value.error) {
+          nextErrors.push(`quotes: ${quotesRes.value.error.message}`);
+        } else {
+          setQuotes((quotesRes.value.data as QuoteRecord[]) || []);
+        }
+      } else {
+        nextErrors.push("quotes: load failed");
+      }
+
+      if (nextErrors.length === 3) {
+        setError(`Errore: ${nextErrors[0]}`);
+      } else {
+        setError("");
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Caricamento non riuscito.";
+      setError(`Errore: ${message}`);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function openNewClient() {
+    setSelectedClient(null);
+    setForm(initialForm);
+    setShowClientEditor(true);
+    setActiveTab("clienti");
+  }
+
+  function openClient(client: ClientRecord) {
+    setSelectedClient(client);
+    setForm({
+      name: getClientName(client),
+      city: getClientCity(client),
+      phone: getClientPhone(client),
+      email: getClientEmail(client),
+      notes: getClientNotes(client),
+      chest: getMeasure(client, "chest"),
+      waist: getMeasure(client, "waist"),
+      hip: getMeasure(client, "hip"),
+      shoulder: getMeasure(client, "shoulder"),
+      sleeve: getMeasure(client, "sleeve"),
+      rise: getMeasure(client, "rise"),
+      inseam: getMeasure(client, "inseam"),
+    });
+    setShowClientEditor(true);
+    setActiveTab("clienti");
+  }
+
+  async function saveClient() {
+    if (!supabase) {
+      setError("Supabase non configurato.");
       return;
     }
 
-    const c = (clientsRes.data || []) as Client[];
-    const o = (ordersRes.data || []) as Order[];
-    const q = (quotesRes.data || []) as Quote[];
-    const r = (refsRes.data || []) as OrderReference[];
+    if (!form.name.trim()) {
+      setError("Inserisci almeno il nome del cliente.");
+      return;
+    }
 
-    setClients(c);
-    setOrders(o);
-    setQuotes(q);
-    setReferences(r);
+    setSavingClient(true);
+    setError("");
 
-    setSelectedClientId((prev) => prev ?? c[0]?.id ?? null);
-    setSelectedOrderId((prev) => prev ?? o[0]?.id ?? null);
-    setSelectedQuoteId((prev) => prev ?? q[0]?.id ?? null);
-
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    loadAll();
-  }, []);
-
-  const createClient = async () => {
-    if (!clientForm.name.trim()) return;
-    const { error } = await supabase.from("clients").insert([clientForm]);
-    if (error) return flash(`Errore: ${error.message}`, "error");
-    setClientForm(emptyClient);
-    setOpenClientForm(false);
-    flash("Cliente salvato.");
-    loadAll();
-  };
-
-  const updateClientField = async (field: keyof Client, value: string) => {
-    if (!selectedClient) return;
-    setClients((prev) => prev.map((c) => (c.id === selectedClient.id ? { ...c, [field]: value } : c)));
-    const { error } = await supabase.from("clients").update({ [field]: value }).eq("id", selectedClient.id);
-    if (error) flash(`Errore: ${error.message}`, "error");
-  };
-
-  const deleteClient = async () => {
-    if (!selectedClient) return;
-    const hasOpenOrders = orders.some((o) => o.client_id === selectedClient.id && o.status !== "Consegnato");
-    if (hasOpenOrders) return flash("Questo cliente ha ancora ordini non consegnati.", "error");
-    await supabase.from("quotes").delete().eq("client_id", selectedClient.id);
-    await supabase.from("orders").delete().eq("client_id", selectedClient.id);
-    const { error } = await supabase.from("clients").delete().eq("id", selectedClient.id);
-    if (error) return flash(`Errore: ${error.message}`, "error");
-    setSelectedClientId(null);
-    flash("Cliente eliminato.");
-    loadAll();
-  };
-
-  const createOrder = async () => {
-    if (!orderForm.client_id || !orderForm.garment.trim()) return;
     const payload = {
-      ...orderForm,
-      price: Number(orderForm.price || 0),
-      advance: Number(orderForm.advance || 0),
+      name: form.name.trim(),
+      city: form.city.trim() || null,
+      phone: form.phone.trim() || null,
+      email: form.email.trim() || null,
+      notes: form.notes.trim() || null,
+      chest: parseNumberOrNull(form.chest),
+      waist: parseNumberOrNull(form.waist),
+      hip: parseNumberOrNull(form.hip),
+      shoulder: parseNumberOrNull(form.shoulder),
+      sleeve: parseNumberOrNull(form.sleeve),
+      rise: parseNumberOrNull(form.rise),
+      inseam: parseNumberOrNull(form.inseam),
     };
-    const { error } = await supabase.from("orders").insert([payload]);
-    if (error) return flash(`Errore: ${error.message}`, "error");
-    setOrderForm(emptyOrder);
-    setOpenOrderForm(false);
-    flash("Ordine creato.");
-    loadAll();
+
+    try {
+      let result;
+
+      if (selectedClient?.id) {
+        result = await supabase
+          .from("clients")
+          .update(payload)
+          .eq("id", selectedClient.id)
+          .select()
+          .single();
+      } else {
+        result = await supabase
+          .from("clients")
+          .insert(payload)
+          .select()
+          .single();
+      }
+
+      if (result.error) {
+        throw result.error;
+      }
+
+      await loadAllData(true);
+      if (result.data) {
+        openClient(result.data as ClientRecord);
+      } else {
+        setShowClientEditor(false);
+      }
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Salvataggio non riuscito.";
+      setError(`Errore: ${message}`);
+    } finally {
+      setSavingClient(false);
+    }
+  }
+
+  const filteredClients = clients.filter((client) => {
+    const haystack = `${getClientName(client)} ${getClientCity(client)} ${getClientPhone(client)} ${getClientEmail(client)}`
+      .toLowerCase()
+      .trim();
+    return haystack.includes(clientSearch.toLowerCase().trim());
+  });
+
+  const openOrdersCount = orders.filter(isOrderOpen).length;
+  const totalOrderValue = orders.reduce((sum, order) => {
+    const value = Number(order.total ?? order.amount ?? order.value ?? 0);
+    return sum + (Number.isFinite(value) ? value : 0);
+  }, 0);
+  const totalDeposits = orders.reduce((sum, order) => {
+    const value = Number(order.acconto ?? order.deposit ?? 0);
+    return sum + (Number.isFinite(value) ? value : 0);
+  }, 0);
+
+  const desktopTwoCols = !isMobile;
+
+  const styles = {
+    page: {
+      minHeight: "100vh",
+      background: "#f2f1ed",
+      color: "#1a1a1a",
+      padding: isMobile ? "24px 16px 40px" : "40px",
+      fontFamily: "Arial, sans-serif",
+    } as const,
+    shell: {
+      maxWidth: 1320,
+      margin: "0 auto",
+    } as const,
+    brand: {
+      fontSize: 14,
+      letterSpacing: "0.35em",
+      color: "#6f6b66",
+      marginBottom: 10,
+    } as const,
+    titleRow: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: isMobile ? "flex-start" : "flex-end",
+      gap: 16,
+      flexDirection: isMobile ? "column" : "row",
+      marginBottom: 28,
+    } as const,
+    h1: {
+      fontSize: isMobile ? 40 : 74,
+      lineHeight: 0.95,
+      margin: 0,
+      fontFamily: 'Georgia, "Times New Roman", serif',
+      fontWeight: 700,
+    } as const,
+    subtitle: {
+      fontSize: isMobile ? 16 : 18,
+      color: "#6f6b66",
+      marginTop: 10,
+    } as const,
+    button: {
+      borderRadius: 999,
+      border: "1px solid #d9d2c8",
+      background: "#fff",
+      color: "#1a1a1a",
+      padding: "14px 22px",
+      fontSize: 16,
+      cursor: "pointer",
+      whiteSpace: "nowrap" as const,
+    },
+    buttonDark: {
+      borderRadius: 999,
+      border: "1px solid #111",
+      background: "#111",
+      color: "#fff",
+      padding: "14px 22px",
+      fontSize: 16,
+      cursor: "pointer",
+      whiteSpace: "nowrap" as const,
+    },
+    error: {
+      marginBottom: 20,
+      borderRadius: 24,
+      border: "1px solid #efc3be",
+      background: "#f8e8e6",
+      color: "#c44334",
+      padding: "16px 18px",
+      fontSize: 15,
+    } as const,
+    cardGrid: {
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(4, minmax(0, 1fr))",
+      gap: 16,
+      marginBottom: 28,
+    } as const,
+    statCard: {
+      border: "1px solid #ddd4c8",
+      borderRadius: 28,
+      background: "#faf9f6",
+      padding: isMobile ? "18px 16px" : "22px 24px",
+      minHeight: isMobile ? 120 : 130,
+    } as const,
+    statLabel: {
+      fontSize: 13,
+      letterSpacing: "0.24em",
+      textTransform: "uppercase" as const,
+      color: "#8c867f",
+      marginBottom: 18,
+    } as const,
+    statValue: {
+      fontSize: isMobile ? 28 : 54,
+      lineHeight: 1,
+      fontWeight: 700,
+    } as const,
+    tabs: {
+      display: "flex",
+      gap: 10,
+      flexWrap: "wrap" as const,
+      marginBottom: 28,
+    } as const,
+    tab: {
+      borderRadius: 999,
+      border: "1px solid #ddd4c8",
+      background: "#f7f5f1",
+      color: "#6d6862",
+      padding: "10px 18px",
+      fontSize: 15,
+      cursor: "pointer",
+    } as const,
+    tabActive: {
+      borderRadius: 999,
+      border: "1px solid #111",
+      background: "#111",
+      color: "#fff",
+      padding: "10px 18px",
+      fontSize: 15,
+      cursor: "pointer",
+    } as const,
+    sectionGrid: {
+      display: "grid",
+      gridTemplateColumns: desktopTwoCols ? "1.15fr 0.85fr" : "1fr",
+      gap: 20,
+      alignItems: "start",
+    } as const,
+    panel: {
+      border: "1px solid #ddd4c8",
+      borderRadius: 36,
+      background: "#faf9f6",
+      padding: isMobile ? "20px 16px" : "26px",
+      minHeight: 320,
+    } as const,
+    panelTitle: {
+      fontSize: isMobile ? 26 : 32,
+      lineHeight: 1.05,
+      margin: "0 0 18px 0",
+      fontWeight: 700,
+    } as const,
+    muted: {
+      color: "#7e7872",
+      fontSize: isMobile ? 16 : 18,
+    } as const,
+    input: {
+      width: "100%",
+      borderRadius: 999,
+      border: "1px solid #ddd4c8",
+      background: "#fff",
+      padding: "14px 16px",
+      fontSize: 16,
+      outline: "none",
+      color: "#1a1a1a",
+      boxSizing: "border-box" as const,
+    },
+    textarea: {
+      width: "100%",
+      borderRadius: 24,
+      border: "1px solid #ddd4c8",
+      background: "#fff",
+      padding: "14px 16px",
+      fontSize: 16,
+      outline: "none",
+      color: "#1a1a1a",
+      resize: "vertical" as const,
+      boxSizing: "border-box" as const,
+      minHeight: 110,
+    },
+    fieldGrid: {
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+      gap: 14,
+    } as const,
+    measuresGrid: {
+      display: "grid",
+      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr",
+      gap: 14,
+    } as const,
+    fieldBlock: {
+      marginBottom: 14,
+    } as const,
+    label: {
+      fontSize: 13,
+      letterSpacing: "0.18em",
+      textTransform: "uppercase" as const,
+      color: "#8a847d",
+      marginBottom: 8,
+      display: "block",
+    } as const,
+    list: {
+      display: "grid",
+      gap: 12,
+      marginTop: 14,
+    } as const,
+    clientItem: {
+      border: "1px solid #ddd4c8",
+      background: "#fff",
+      borderRadius: 26,
+      padding: "16px 18px",
+      cursor: "pointer",
+    } as const,
+    clientItemActive: {
+      border: "1px solid #111",
+      background: "#fff",
+      borderRadius: 26,
+      padding: "16px 18px",
+      cursor: "pointer",
+      boxShadow: "0 0 0 2px rgba(17,17,17,0.04)",
+    } as const,
+    rowBetween: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 12,
+      flexWrap: "wrap" as const,
+    } as const,
+    helper: {
+      fontSize: 14,
+      color: "#8a847d",
+    } as const,
+    dividerSpace: {
+      height: 12,
+    } as const,
   };
 
-  const updateOrderField = async (field: keyof Order, value: string) => {
-    if (!selectedOrder) return;
-    setOrders((prev) => prev.map((o) => (o.id === selectedOrder.id ? { ...o, [field]: value } : o)));
-    const payload = field === "price" || field === "advance" ? { [field]: Number(value || 0) } : { [field]: value };
-    const { error } = await supabase.from("orders").update(payload).eq("id", selectedOrder.id);
-    if (error) flash(`Errore: ${error.message}`, "error");
-  };
+  function renderDashboard() {
+    return (
+      <div style={styles.sectionGrid}>
+        <div style={styles.panel}>
+          <h2 style={styles.panelTitle}>Lavori in corso</h2>
+          <div style={styles.list}>
+            {orders.filter(isOrderOpen).slice(0, 6).length === 0 ? (
+              <div style={styles.muted}>Nessun ordine aperto al momento.</div>
+            ) : (
+              orders.filter(isOrderOpen).slice(0, 6).map((order, index) => (
+                <div key={String(order.id ?? index)} style={styles.clientItem}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                    Ordine #{String(order.id ?? index + 1)}
+                  </div>
+                  <div style={styles.helper}>
+                    Stato: {String(order.status || "Aperto")}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
 
-  const deleteOrder = async () => {
-    if (!selectedOrder) return;
-    await supabase.from("order_references").delete().eq("order_id", selectedOrder.id);
-    const { error } = await supabase.from("orders").delete().eq("id", selectedOrder.id);
-    if (error) return flash(`Errore: ${error.message}`, "error");
-    setSelectedOrderId(null);
-    flash("Ordine eliminato.");
-    loadAll();
-  };
+        <div style={styles.panel}>
+          <h2 style={styles.panelTitle}>Focus di oggi</h2>
+          <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+            <input
+              style={styles.input}
+              value={taskInput}
+              onChange={(e) => setTaskInput(e.target.value)}
+              placeholder="Scrivi una task"
+            />
+            <button
+              style={styles.buttonDark}
+              onClick={() => {
+                if (!taskInput.trim()) return;
+                setTasks((prev) => [...prev, taskInput.trim()]);
+                setTaskInput("");
+              }}
+            >
+              Aggiungi
+            </button>
+          </div>
 
-  const createQuote = async () => {
-    if (!quoteForm.client_id || !quoteForm.garment.trim()) return;
-    const total = Number(quoteForm.base_price || 0) + Number(quoteForm.extras || 0);
-    const payload = {
-      ...quoteForm,
-      base_price: Number(quoteForm.base_price || 0),
-      extras: Number(quoteForm.extras || 0),
-      deposit: Number(quoteForm.deposit || 0),
-      total,
-    };
-    const { error } = await supabase.from("quotes").insert([payload]);
-    if (error) return flash(`Errore: ${error.message}`, "error");
-    setQuoteForm(emptyQuote);
-    setOpenQuoteForm(false);
-    flash("Preventivo creato.");
-    loadAll();
-  };
+          <div style={styles.list}>
+            {tasks.map((task, idx) => (
+              <div
+                key={`${task}-${idx}`}
+                style={{
+                  ...styles.clientItem,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <span>{task}</span>
+                <button
+                  onClick={() =>
+                    setTasks((prev) => prev.filter((_, i) => i !== idx))
+                  }
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "#c44334",
+                    cursor: "pointer",
+                    fontSize: 15,
+                  }}
+                >
+                  Elimina
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  const updateQuoteField = async (field: keyof Quote, value: string) => {
-    if (!selectedQuote) return;
-    const next = { ...selectedQuote, [field]: value } as Quote;
-    const total = Number(next.base_price || 0) + Number(next.extras || 0);
-    setQuotes((prev) => prev.map((q) => (q.id === selectedQuote.id ? { ...next, total } : q)));
-    const payload: Record<string, any> = {
-      [field]: field === "base_price" || field === "extras" || field === "deposit" ? Number(value || 0) : value,
-      total,
-    };
-    const { error } = await supabase.from("quotes").update(payload).eq("id", selectedQuote.id);
-    if (error) flash(`Errore: ${error.message}`, "error");
-  };
+  function renderClientEditor() {
+    return (
+      <div style={styles.panel}>
+        <h2 style={styles.panelTitle}>Scheda cliente</h2>
+        {!showClientEditor && !selectedClient ? (
+          <div style={styles.muted}>Seleziona un cliente.</div>
+        ) : (
+          <>
+            <div style={styles.fieldGrid}>
+              <div style={styles.fieldBlock}>
+                <label style={styles.label}>Nome</label>
+                <input
+                  style={styles.input}
+                  value={form.name}
+                  onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                  placeholder="Nome cliente"
+                />
+              </div>
 
-  const deleteQuote = async () => {
-    if (!selectedQuote) return;
-    const { error } = await supabase.from("quotes").delete().eq("id", selectedQuote.id);
-    if (error) return flash(`Errore: ${error.message}`, "error");
-    setSelectedQuoteId(null);
-    flash("Preventivo eliminato.");
-    loadAll();
-  };
+              <div style={styles.fieldBlock}>
+                <label style={styles.label}>Città</label>
+                <input
+                  style={styles.input}
+                  value={form.city}
+                  onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
+                  placeholder="Città"
+                />
+              </div>
 
-  const convertQuoteToOrder = async () => {
-    if (!selectedQuote) return;
-    const payload = {
-      client_id: selectedQuote.client_id,
-      garment: selectedQuote.garment,
-      construction: "Su misura",
-      status: "Preventivo",
-      price: Number(selectedQuote.total || 0),
-      advance: Number(selectedQuote.deposit || 0),
-      notes: selectedQuote.description || "",
-      due_date: null,
-    };
-    const { error } = await supabase.from("orders").insert([payload]);
-    if (error) return flash(`Errore: ${error.message}`, "error");
-    await supabase.from("quotes").update({ status: "Convertito" }).eq("id", selectedQuote.id);
-    flash("Preventivo convertito in ordine.");
-    loadAll();
-  };
+              <div style={styles.fieldBlock}>
+                <label style={styles.label}>Telefono</label>
+                <input
+                  style={styles.input}
+                  value={form.phone}
+                  onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
+                  placeholder="Telefono"
+                />
+              </div>
 
-  const createReference = async () => {
-    if (!selectedOrder || (!referenceForm.url.trim() && !referenceForm.note.trim())) return;
-    const payload = {
-      order_id: selectedOrder.id,
-      type: referenceForm.type,
-      url: referenceForm.url,
-      note: referenceForm.note,
-      stage: referenceForm.stage,
-    };
-    const { error } = await supabase.from("order_references").insert([payload]);
-    if (error) return flash(`Errore: ${error.message}`, "error");
-    setReferenceForm(emptyReference);
-    setOpenReferenceForm(false);
-    flash("Reference aggiunta.");
-    loadAll();
-  };
+              <div style={styles.fieldBlock}>
+                <label style={styles.label}>Email</label>
+                <input
+                  style={styles.input}
+                  value={form.email}
+                  onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+                  placeholder="Email"
+                />
+              </div>
+            </div>
 
-  const deleteReference = async (id: string) => {
-    const { error } = await supabase.from("order_references").delete().eq("id", id);
-    if (error) return flash(`Errore: ${error.message}`, "error");
-    flash("Reference eliminata.");
-    loadAll();
-  };
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Note</label>
+              <textarea
+                style={styles.textarea}
+                value={form.notes}
+                onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+                placeholder="Note cliente"
+              />
+            </div>
 
-  const addTodo = () => {
-    if (!todoText.trim()) return;
-    setTodos((prev) => [{ id: crypto.randomUUID(), text: todoText, done: false }, ...prev]);
-    setTodoText("");
-  };
+            <div style={styles.dividerSpace} />
 
-  const toggleTodo = (id: string) => {
-    setTodos((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
-  };
+            <h3
+              style={{
+                margin: "0 0 14px 0",
+                fontSize: 18,
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: "#6f6b66",
+              }}
+            >
+              Misure base
+            </h3>
 
-  const deleteTodo = (id: string) => {
-    setTodos((prev) => prev.filter((t) => t.id !== id));
-  };
+            <div style={styles.measuresGrid}>
+              {[
+                ["chest", "Chest"],
+                ["waist", "Waist"],
+                ["hip", "Hip"],
+                ["shoulder", "Shoulder"],
+                ["sleeve", "Sleeve"],
+                ["rise", "Rise"],
+                ["inseam", "Inseam"],
+              ].map(([key, label]) => (
+                <div key={key} style={styles.fieldBlock}>
+                  <label style={styles.label}>{label}</label>
+                  <input
+                    style={styles.input}
+                    value={form[key as keyof FormState]}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        [key]: e.target.value,
+                      }))
+                    }
+                    placeholder={label}
+                  />
+                </div>
+              ))}
+            </div>
 
-  if (loading) {
-    return <div style={{ minHeight: "100vh", background: bg, color: text, padding: 40, fontFamily: "Arial, sans-serif" }}>Caricamento…</div>;
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                marginTop: 24,
+                flexWrap: "wrap",
+              }}
+            >
+              <button
+                style={{
+                  ...styles.buttonDark,
+                  width: isMobile ? "100%" : "auto",
+                  opacity: savingClient ? 0.7 : 1,
+                }}
+                onClick={() => void saveClient()}
+                disabled={savingClient}
+              >
+                {savingClient ? "Salvataggio..." : "Salva cliente"}
+              </button>
+
+              {(showClientEditor || selectedClient) && (
+                <button
+                  style={{
+                    ...styles.button,
+                    width: isMobile ? "100%" : "auto",
+                  }}
+                  onClick={() => {
+                    setShowClientEditor(false);
+                    if (selectedClient) {
+                      openClient(selectedClient);
+                    } else {
+                      setForm(initialForm);
+                    }
+                  }}
+                >
+                  Chiudi
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  function renderClienti() {
+    return (
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "0.92fr 1.08fr",
+          gap: 20,
+          alignItems: "start",
+        }}
+      >
+        <div style={styles.panel}>
+          <div style={styles.rowBetween}>
+            <h2 style={styles.panelTitle}>Clienti</h2>
+            <button style={styles.buttonDark} onClick={openNewClient}>
+              Nuovo cliente
+            </button>
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <input
+              style={styles.input}
+              value={clientSearch}
+              onChange={(e) => setClientSearch(e.target.value)}
+              placeholder="Cerca cliente"
+            />
+          </div>
+
+          <div style={styles.list}>
+            {filteredClients.length === 0 ? (
+              <div style={styles.muted}>Nessun cliente trovato.</div>
+            ) : (
+              filteredClients.map((client, index) => {
+                const active = selectedClient?.id === client.id;
+                return (
+                  <div
+                    key={String(client.id ?? index)}
+                    style={active ? styles.clientItemActive : styles.clientItem}
+                    onClick={() => openClient(client)}
+                  >
+                    <div
+                      style={{
+                        fontSize: 13,
+                        letterSpacing: "0.22em",
+                        textTransform: "uppercase",
+                        color: "#8a847d",
+                        marginBottom: 8,
+                      }}
+                    >
+                      Cliente
+                    </div>
+                    <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>
+                      {getClientName(client)}
+                    </div>
+                    <div style={styles.helper}>
+                      {[getClientCity(client), getClientPhone(client), getClientEmail(client)]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {renderClientEditor()}
+      </div>
+    );
+  }
+
+  function renderSimplePanel(title: string, rows: Array<{ title: string; meta?: string }>) {
+    return (
+      <div style={styles.panel}>
+        <h2 style={styles.panelTitle}>{title}</h2>
+        <div style={styles.list}>
+          {rows.length === 0 ? (
+            <div style={styles.muted}>Nessun elemento disponibile.</div>
+          ) : (
+            rows.map((row, idx) => (
+              <div key={`${row.title}-${idx}`} style={styles.clientItem}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>{row.title}</div>
+                {row.meta ? <div style={styles.helper}>{row.meta}</div> : null}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: bg, color: text, padding: 40, fontFamily: "Arial, sans-serif" }}>
-      <div style={{ maxWidth: 1320, margin: "0 auto" }}>
-        <div style={{ marginBottom: 28, display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
+    <main style={styles.page}>
+      <div style={styles.shell}>
+        <div style={styles.brand}>CHAVARRIAGA</div>
+
+        <div style={styles.titleRow}>
           <div>
-            <p style={{ fontSize: 12, letterSpacing: "0.34em", textTransform: "uppercase", color: "#7a756f", marginBottom: 10 }}>Chavarriaga</p>
-            <h1 style={{ fontFamily: "Georgia, serif", fontSize: 60, lineHeight: 1, margin: 0 }}>Sartoria Manager</h1>
-            <p style={{ color: muted, marginTop: 18, fontSize: 18 }}>Versione premium sincronizzata con Supabase.</p>
+            <h1 style={styles.h1}>Sartoria Manager</h1>
+            <div style={styles.subtitle}>
+              Versione premium sincronizzata con Supabase.
+            </div>
           </div>
-          <AppButton variant="secondary" onClick={loadAll}>Ricarica dati</AppButton>
+
+          <button
+            style={styles.button}
+            onClick={() => void loadAllData(true)}
+            disabled={loading}
+          >
+            {loading ? "Caricamento..." : "Ricarica dati"}
+          </button>
         </div>
 
-        {message ? <div style={{ marginBottom: 20, borderRadius: 20, padding: 16, ...flashStyle(messageType) }}>{message}</div> : null}
+        {error && !loading ? <div style={styles.error}>{error}</div> : null}
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16, marginBottom: 28, alignItems: "stretch" }}>
-          <CardShell><div style={{ fontSize: 11, letterSpacing: "0.28em", textTransform: "uppercase", color: "#7a756f", marginBottom: 14 }}>Clienti</div><div style={{ fontSize: 46, fontWeight: 700 }}>{clients.length}</div></CardShell>
-          <CardShell><div style={{ fontSize: 11, letterSpacing: "0.28em", textTransform: "uppercase", color: "#7a756f", marginBottom: 14 }}>Ordini aperti</div><div style={{ fontSize: 46, fontWeight: 700 }}>{openOrders}</div></CardShell>
-          <CardShell><div style={{ fontSize: 11, letterSpacing: "0.28em", textTransform: "uppercase", color: "#7a756f", marginBottom: 14 }}>Valore ordini</div><div style={{ fontSize: 46, fontWeight: 700 }}>{money(totalOrdersValue)}</div></CardShell>
-          <CardShell><div style={{ fontSize: 11, letterSpacing: "0.28em", textTransform: "uppercase", color: "#7a756f", marginBottom: 14 }}>Acconti</div><div style={{ fontSize: 46, fontWeight: 700 }}>{money(totalAdvance)}</div></CardShell>
+        <div style={styles.cardGrid}>
+          <div style={styles.statCard}>
+            <div style={styles.statLabel}>Clienti</div>
+            <div style={styles.statValue}>{clients.length}</div>
+          </div>
+
+          <div style={styles.statCard}>
+            <div style={styles.statLabel}>Ordini aperti</div>
+            <div style={styles.statValue}>{openOrdersCount}</div>
+          </div>
+
+          <div style={styles.statCard}>
+            <div style={styles.statLabel}>Valore ordini</div>
+            <div style={styles.statValue}>{euro(totalOrderValue)}</div>
+          </div>
+
+          <div style={styles.statCard}>
+            <div style={styles.statLabel}>Acconti</div>
+            <div style={styles.statValue}>{euro(totalDeposits)}</div>
+          </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, marginBottom: 28, flexWrap: "wrap" }}>
-          <TabButton active={view === "dashboard"} onClick={() => setView("dashboard")}>Dashboard</TabButton>
-          <TabButton active={view === "clienti"} onClick={() => setView("clienti")}>Clienti</TabButton>
-          <TabButton active={view === "misure"} onClick={() => setView("misure")}>Misure</TabButton>
-          <TabButton active={view === "ordini"} onClick={() => setView("ordini")}>Ordini</TabButton>
-          <TabButton active={view === "preventivi"} onClick={() => setView("preventivi")}>Preventivi</TabButton>
+        <div style={styles.tabs}>
+          {[
+            ["dashboard", "Dashboard"],
+            ["clienti", "Clienti"],
+            ["misure", "Misure"],
+            ["ordini", "Ordini"],
+            ["preventivi", "Preventivi"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              style={activeTab === key ? styles.tabActive : styles.tab}
+              onClick={() => setActiveTab(key as TabKey)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
-        {view === "dashboard" && (
-          <div style={{ display: "grid", gridTemplateColumns: "1.1fr 0.9fr", gap: 20, alignItems: "stretch" }}>
-            <CardShell>
-              <h2 style={{ marginTop: 0, marginBottom: 20 }}>Lavori in corso</h2>
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {orders.map((o) => {
-                  const client = clients.find((c) => c.id === o.client_id);
-                  return (
-                    <div key={o.id} onClick={() => { setSelectedOrderId(o.id); setView("ordini"); }} style={{ borderBottom: `1px solid ${border}`, paddingBottom: 14, cursor: "pointer" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 20, alignItems: "flex-start" }}>
-                        <div>
-                          <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 6 }}>{o.garment || "—"}</div>
-                          <div style={{ color: muted, fontSize: 15 }}>{client?.name || "—"}</div>
-                        </div>
-                        <span style={badgeStyle(o.status)}>{o.status || "—"}</span>
-                      </div>
-                      <div style={{ marginTop: 10, color: muted, fontSize: 14 }}>Consegna — {o.due_date || "—"}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardShell>
-
-            <CardShell>
-              <h2 style={{ marginTop: 0, marginBottom: 20 }}>Focus di oggi</h2>
-              <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-                <input value={todoText} onChange={(e) => setTodoText(e.target.value)} placeholder="Scrivi una task" style={{ flex: 1, width: "100%", boxSizing: "border-box", border: `1px solid ${border}`, background: "#fff", borderRadius: 999, padding: "12px 16px", fontSize: 15, outline: "none" }} />
-                <AppButton onClick={addTodo}>Aggiungi</AppButton>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                {todos.map((todo) => (
-                  <div key={todo.id} style={{ display: "flex", alignItems: "center", gap: 12, border: `1px solid ${border}`, background: card, borderRadius: 22, padding: 14 }}>
-                    <button onClick={() => toggleTodo(todo.id)} style={{ width: 22, height: 22, borderRadius: 999, border: todo.done ? "1px solid #111" : `1px solid ${border}`, background: todo.done ? "#111" : "#fff", color: "#fff", cursor: "pointer" }}>✓</button>
-                    <div style={{ flex: 1, fontSize: 15, color: todo.done ? "#8a837b" : text, textDecoration: todo.done ? "line-through" : "none" }}>{todo.text}</div>
-                    <button onClick={() => deleteTodo(todo.id)} style={{ border: "none", background: "transparent", color: "#9f1d1d", cursor: "pointer", fontSize: 14 }}>Elimina</button>
-                  </div>
-                ))}
-              </div>
-            </CardShell>
-          </div>
-        )}
-
-        {view === "clienti" && (
-          <div style={{ display: "grid", gridTemplateColumns: "0.85fr 1.15fr", gap: 20, alignItems: "stretch" }}>
-            <CardShell>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 18 }}>
-                <h2 style={{ margin: 0 }}>Clienti</h2>
-                <AppButton onClick={() => setOpenClientForm((v) => !v)}>{openClientForm ? "Chiudi" : "Nuovo"}</AppButton>
-              </div>
-              <input value={searchClient} onChange={(e) => setSearchClient(e.target.value)} placeholder="Cerca cliente" style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${border}`, background: "#fff", borderRadius: 999, padding: "12px 16px", fontSize: 15, outline: "none", marginBottom: 18 }} />
-              {openClientForm && (
-                <div style={{ marginBottom: 24, border: `1px solid ${border}`, borderRadius: 22, padding: 18, background: "#fffdfb" }}>
-                  <div style={{ fontSize: 11, letterSpacing: "0.28em", textTransform: "uppercase", color: "#7a756f", marginBottom: 14 }}>Nuovo cliente</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
-                    <Field label="Nome" value={clientForm.name} onChange={(v) => setClientForm({ ...clientForm, name: v })} />
-                    <Field label="Città" value={clientForm.city} onChange={(v) => setClientForm({ ...clientForm, city: v })} />
-                    <Field label="Telefono" value={clientForm.phone} onChange={(v) => setClientForm({ ...clientForm, phone: v })} />
-                    <Field label="Email" value={clientForm.email} onChange={(v) => setClientForm({ ...clientForm, email: v })} />
-                  </div>
-                  <Area label="Note" value={clientForm.notes} onChange={(v) => setClientForm({ ...clientForm, notes: v })} />
-                  <div style={{ height: 16 }} />
-                  <div style={{ fontSize: 11, letterSpacing: "0.28em", textTransform: "uppercase", color: "#7a756f", marginBottom: 14 }}>Misure base</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
-                    {(["chest", "waist", "hip", "shoulder", "sleeve", "neck", "inseam", "outseam"] as const).map((k) => (
-                      <Field key={k} label={k} value={clientForm[k]} onChange={(v) => setClientForm({ ...clientForm, [k]: v })} />
-                    ))}
-                  </div>
-                  <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end" }}><AppButton onClick={createClient}>Salva cliente</AppButton></div>
-                </div>
-              )}
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {filteredClients.map((client) => (
-                  <div key={client.id} onClick={() => setSelectedClientId(client.id)} style={{ borderBottom: selectedClientId === client.id ? "1px solid #111" : `1px solid ${border}`, paddingBottom: 14, cursor: "pointer" }}>
-                    <div style={{ fontSize: 20, fontWeight: 600 }}>{client.name}</div>
-                    <div style={{ color: muted, marginTop: 4 }}>{client.city || "—"}</div>
-                  </div>
-                ))}
-              </div>
-            </CardShell>
-
-            <CardShell>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 18 }}>
-                <h2 style={{ margin: 0 }}>Scheda cliente</h2>
-                {selectedClient ? <AppButton variant="danger" onClick={deleteClient}>Elimina cliente</AppButton> : null}
-              </div>
-              {selectedClient ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-                    <Field label="Nome" value={selectedClient.name} onChange={(v) => updateClientField("name", v)} />
-                    <Field label="Città" value={selectedClient.city} onChange={(v) => updateClientField("city", v)} />
-                    <Field label="Telefono" value={selectedClient.phone} onChange={(v) => updateClientField("phone", v)} />
-                    <Field label="Email" value={selectedClient.email} onChange={(v) => updateClientField("email", v)} />
-                  </div>
-                  <Area label="Note" value={selectedClient.notes} onChange={(v) => updateClientField("notes", v)} />
-                </div>
-              ) : <p style={{ color: muted }}>Seleziona un cliente.</p>}
-            </CardShell>
-          </div>
-        )}
-
-        {view === "misure" && (
-          <div style={{ display: "grid", gridTemplateColumns: "0.85fr 1.15fr", gap: 20, alignItems: "stretch" }}>
-            <CardShell>
-              <h2 style={{ marginTop: 0, marginBottom: 18 }}>Clienti</h2>
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {clients.map((client) => (
-                  <div key={client.id} onClick={() => setSelectedClientId(client.id)} style={{ borderBottom: selectedClientId === client.id ? "1px solid #111" : `1px solid ${border}`, paddingBottom: 14, cursor: "pointer" }}>
-                    <div style={{ fontSize: 20, fontWeight: 600 }}>{client.name}</div>
-                    <div style={{ color: muted, marginTop: 4 }}>{client.city || "—"}</div>
-                  </div>
-                ))}
-              </div>
-            </CardShell>
-            <CardShell>
-              <h2 style={{ marginTop: 0, marginBottom: 18 }}>Scheda misure</h2>
-              {selectedClient ? (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 18 }}>
-                  {(["chest", "waist", "hip", "shoulder", "sleeve", "neck", "inseam", "outseam"] as const).map((k) => (
-                    <Field key={k} label={k} value={selectedClient[k]} onChange={(v) => updateClientField(k, v)} />
-                  ))}
-                </div>
-              ) : <p style={{ color: muted }}>Seleziona un cliente.</p>}
-            </CardShell>
-          </div>
-        )}
-
-        {view === "ordini" && (
-          <div style={{ display: "grid", gridTemplateColumns: "0.82fr 1.18fr", gap: 20, alignItems: "stretch" }}>
-            <CardShell>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 18 }}>
-                <h2 style={{ margin: 0 }}>Ordini</h2>
-                <AppButton onClick={() => setOpenOrderForm((v) => !v)}>{openOrderForm ? "Chiudi" : "Nuovo"}</AppButton>
-              </div>
-              <input value={searchOrder} onChange={(e) => setSearchOrder(e.target.value)} placeholder="Cerca ordine" style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${border}`, background: "#fff", borderRadius: 999, padding: "12px 16px", fontSize: 15, outline: "none", marginBottom: 18 }} />
-              {openOrderForm && (
-                <div style={{ marginBottom: 24, border: `1px solid ${border}`, borderRadius: 22, padding: 18, background: "#fffdfb" }}>
-                  <div style={{ fontSize: 11, letterSpacing: "0.28em", textTransform: "uppercase", color: "#7a756f", marginBottom: 14 }}>Nuovo ordine</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
-                    <SelectField label="Cliente" value={orderForm.client_id} options={["", ...clientOptions]} labels={clientLabels} onChange={(v) => setOrderForm({ ...orderForm, client_id: v })} />
-                    <Field label="Prenda" value={orderForm.garment} onChange={(v) => setOrderForm({ ...orderForm, garment: v })} />
-                    <Field label="Costruzione" value={orderForm.construction} onChange={(v) => setOrderForm({ ...orderForm, construction: v })} />
-                    <SelectField label="Stato" value={orderForm.status} options={orderStatuses} onChange={(v) => setOrderForm({ ...orderForm, status: v })} />
-                    <Field label="Prezzo" value={orderForm.price} onChange={(v) => setOrderForm({ ...orderForm, price: v })} />
-                    <Field label="Acconto" value={orderForm.advance} onChange={(v) => setOrderForm({ ...orderForm, advance: v })} />
-                    <Field type="date" label="Consegna" value={orderForm.due_date} onChange={(v) => setOrderForm({ ...orderForm, due_date: v })} />
-                  </div>
-                  <Area label="Note" value={orderForm.notes} onChange={(v) => setOrderForm({ ...orderForm, notes: v })} />
-                  <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end" }}><AppButton onClick={createOrder}>Crea ordine</AppButton></div>
-                </div>
-              )}
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {filteredOrders.map((order) => {
-                  const client = clients.find((c) => c.id === order.client_id);
-                  return (
-                    <div key={order.id} onClick={() => setSelectedOrderId(order.id)} style={{ borderBottom: selectedOrderId === order.id ? "1px solid #111" : `1px solid ${border}`, paddingBottom: 14, cursor: "pointer" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 20, alignItems: "flex-start" }}>
-                        <div>
-                          <div style={{ fontSize: 20, fontWeight: 600 }}>{order.garment || "—"}</div>
-                          <div style={{ color: muted, marginTop: 4 }}>{client?.name || "—"}</div>
-                        </div>
-                        <span style={badgeStyle(order.status)}>{order.status || "—"}</span>
-                      </div>
-                      <div style={{ color: muted, marginTop: 10, fontSize: 14 }}>Consegna — {order.due_date || "—"}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardShell>
-
-            <CardShell>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 18 }}>
-                <h2 style={{ margin: 0 }}>Dettaglio ordine</h2>
-                {selectedOrder ? <AppButton variant="danger" onClick={deleteOrder}>Elimina ordine</AppButton> : null}
-              </div>
-
-              {selectedOrder && selectedOrderClient ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-                  <div>
-                    <div style={{ fontSize: 11, letterSpacing: "0.28em", textTransform: "uppercase", color: "#7a756f", marginBottom: 14 }}>Ordine</div>
-                    <h3 style={{ fontSize: 32, margin: 0, marginBottom: 8 }}>{selectedOrder.garment}</h3>
-                    <p style={{ color: muted, margin: 0 }}>{selectedOrderClient.name}</p>
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-                    <Field label="Prenda" value={selectedOrder.garment} onChange={(v) => updateOrderField("garment", v)} />
-                    <Field label="Costruzione" value={selectedOrder.construction} onChange={(v) => updateOrderField("construction", v)} />
-                    <SelectField label="Stato" value={selectedOrder.status} options={orderStatuses} onChange={(v) => updateOrderField("status", v)} />
-                    <Field type="date" label="Consegna" value={selectedOrder.due_date} onChange={(v) => updateOrderField("due_date", v)} />
-                    <Field label="Prezzo" value={selectedOrder.price} onChange={(v) => updateOrderField("price", v)} />
-                    <Field label="Acconto" value={selectedOrder.advance} onChange={(v) => updateOrderField("advance", v)} />
-                  </div>
-
-                  <Area label="Note ordine" value={selectedOrder.notes} onChange={(v) => updateOrderField("notes", v)} />
-
-                  <div>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
-                      <div style={{ fontSize: 11, letterSpacing: "0.28em", textTransform: "uppercase", color: "#7a756f" }}>References</div>
-                      <AppButton variant="secondary" onClick={() => setOpenReferenceForm((v) => !v)}>
-                        {openReferenceForm ? "Chiudi" : "Nuova reference"}
-                      </AppButton>
-                    </div>
-
-                    {openReferenceForm && (
-                      <div style={{ marginBottom: 18, border: `1px solid ${border}`, borderRadius: 22, padding: 18, background: "#fffdfb" }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
-                          <SelectField label="Tipo" value={referenceForm.type} options={referenceTypes} onChange={(v) => setReferenceForm({ ...referenceForm, type: v })} />
-                          <SelectField label="Stage" value={referenceForm.stage} options={referenceStages} onChange={(v) => setReferenceForm({ ...referenceForm, stage: v })} />
-                          <Field label="URL" value={referenceForm.url} onChange={(v) => setReferenceForm({ ...referenceForm, url: v })} />
-                        </div>
-                        <Area label="Nota" value={referenceForm.note} onChange={(v) => setReferenceForm({ ...referenceForm, note: v })} />
-                        <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end" }}><AppButton onClick={createReference}>Aggiungi reference</AppButton></div>
-                      </div>
-                    )}
-
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                      {selectedOrderReferences.length === 0 ? (
-                        <div style={{ color: muted }}>Nessuna reference per questo ordine.</div>
-                      ) : (
-                        selectedOrderReferences.map((ref) => (
-                          <div key={ref.id} style={{ border: `1px solid ${border}`, borderRadius: 18, background: card, padding: 16 }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
-                              <div>
-                                <div style={{ fontWeight: 600, marginBottom: 6 }}>{ref.stage || "—"}</div>
-                                <div style={{ color: muted, fontSize: 13 }}>{ref.type || "—"}</div>
-                              </div>
-                              <AppButton variant="danger" onClick={() => deleteReference(ref.id)}>Elimina</AppButton>
-                            </div>
-                            {ref.url ? (
-                              <div style={{ marginTop: 12 }}>
-                                <a href={ref.url} target="_blank" rel="noreferrer" style={{ color: "#333", wordBreak: "break-all" }}>
-                                  {ref.url}
-                                </a>
-                              </div>
-                            ) : null}
-                            {ref.note ? <div style={{ marginTop: 10, color: text }}>{ref.note}</div> : null}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : <p style={{ color: muted }}>Seleziona un ordine.</p>}
-            </CardShell>
-          </div>
-        )}
-
-        {view === "preventivi" && (
-          <div style={{ display: "grid", gridTemplateColumns: "0.82fr 1.18fr", gap: 20, alignItems: "stretch" }}>
-            <CardShell>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 18 }}>
-                <h2 style={{ margin: 0 }}>Preventivi</h2>
-                <AppButton onClick={() => setOpenQuoteForm((v) => !v)}>{openQuoteForm ? "Chiudi" : "Nuovo"}</AppButton>
-              </div>
-              {openQuoteForm && (
-                <div style={{ marginBottom: 24, border: `1px solid ${border}`, borderRadius: 22, padding: 18, background: "#fffdfb" }}>
-                  <div style={{ fontSize: 11, letterSpacing: "0.28em", textTransform: "uppercase", color: "#7a756f", marginBottom: 14 }}>Nuovo preventivo</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, marginBottom: 18 }}>
-                    <SelectField label="Cliente" value={quoteForm.client_id} options={["", ...clientOptions]} labels={clientLabels} onChange={(v) => setQuoteForm({ ...quoteForm, client_id: v })} />
-                    <Field label="Prenda" value={quoteForm.garment} onChange={(v) => setQuoteForm({ ...quoteForm, garment: v })} />
-                    <Field label="Prezzo base" value={quoteForm.base_price} onChange={(v) => setQuoteForm({ ...quoteForm, base_price: v })} />
-                    <Field label="Extra" value={quoteForm.extras} onChange={(v) => setQuoteForm({ ...quoteForm, extras: v })} />
-                    <Field label="Acconto" value={quoteForm.deposit} onChange={(v) => setQuoteForm({ ...quoteForm, deposit: v })} />
-                    <SelectField label="Stato" value={quoteForm.status} options={quoteStatuses} onChange={(v) => setQuoteForm({ ...quoteForm, status: v })} />
-                  </div>
-                  <Area label="Descrizione" value={quoteForm.description} onChange={(v) => setQuoteForm({ ...quoteForm, description: v })} />
-                  <div style={{ marginTop: 18, display: "flex", justifyContent: "flex-end" }}><AppButton onClick={createQuote}>Crea preventivo</AppButton></div>
-                </div>
-              )}
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {quotes.map((q) => {
-                  const client = clients.find((c) => c.id === q.client_id);
-                  return (
-                    <div key={q.id} onClick={() => setSelectedQuoteId(q.id)} style={{ border: selectedQuoteId === q.id ? "1px solid #111" : `1px solid ${border}`, borderRadius: 22, background: card, padding: 16, cursor: "pointer" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 20, alignItems: "flex-start" }}>
-                        <div>
-                          <div style={{ fontSize: 20, fontWeight: 600 }}>{q.garment || "—"}</div>
-                          <div style={{ color: muted, marginTop: 4 }}>{client?.name || "—"}</div>
-                        </div>
-                        <span style={badgeStyle(q.status)}>{q.status || "—"}</span>
-                      </div>
-                      <div style={{ marginTop: 12, color: muted, fontSize: 14 }}>{q.description || "—"}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </CardShell>
-
-            <CardShell>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 18 }}>
-                <h2 style={{ margin: 0 }}>Dettaglio preventivo</h2>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  {selectedQuote ? <AppButton variant="secondary" onClick={convertQuoteToOrder}>Converti in ordine</AppButton> : null}
-                  {selectedQuote ? <AppButton variant="danger" onClick={deleteQuote}>Elimina</AppButton> : null}
-                </div>
-              </div>
-              {selectedQuote ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-                    <Field label="Prenda" value={selectedQuote.garment} onChange={(v) => updateQuoteField("garment", v)} />
-                    <SelectField label="Stato" value={selectedQuote.status} options={quoteStatuses} onChange={(v) => updateQuoteField("status", v)} />
-                    <Field label="Prezzo base" value={selectedQuote.base_price} onChange={(v) => updateQuoteField("base_price", v)} />
-                    <Field label="Extra" value={selectedQuote.extras} onChange={(v) => updateQuoteField("extras", v)} />
-                    <Field label="Acconto" value={selectedQuote.deposit} onChange={(v) => updateQuoteField("deposit", v)} />
-                  </div>
-                  <Area label="Descrizione" value={selectedQuote.description} onChange={(v) => updateQuoteField("description", v)} />
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14 }}>
-                    <div style={{ border: `1px solid ${border}`, borderRadius: 18, background: card, padding: 16 }}>Base — {money(selectedQuote.base_price)}</div>
-                    <div style={{ border: `1px solid ${border}`, borderRadius: 18, background: card, padding: 16 }}>Extra — {money(selectedQuote.extras)}</div>
-                    <div style={{ border: `1px solid ${border}`, borderRadius: 18, background: card, padding: 16, fontWeight: 600 }}>Totale — {money(selectedQuote.total)}</div>
-                  </div>
-                </div>
-              ) : <p style={{ color: muted }}>Seleziona un preventivo.</p>}
-            </CardShell>
-          </div>
-        )}
+        {activeTab === "dashboard" && renderDashboard()}
+        {activeTab === "clienti" && renderClienti()}
+        {activeTab === "misure" &&
+          renderSimplePanel(
+            "Misure",
+            clients.map((client) => ({
+              title: getClientName(client),
+              meta: [
+                form.chest && `Chest ${getMeasure(client, "chest")}`,
+                form.waist && `Waist ${getMeasure(client, "waist")}`,
+                form.hip && `Hip ${getMeasure(client, "hip")}`,
+              ]
+                .filter(Boolean)
+                .join(" · "),
+            }))
+          )}
+        {activeTab === "ordini" &&
+          renderSimplePanel(
+            "Ordini",
+            orders.map((order, idx) => ({
+              title: `Ordine #${String(order.id ?? idx + 1)}`,
+              meta: `Stato: ${String(order.status || "Aperto")}`,
+            }))
+          )}
+        {activeTab === "preventivi" &&
+          renderSimplePanel(
+            "Preventivi",
+            quotes.map((quote, idx) => ({
+              title: `Preventivo #${String(quote.id ?? idx + 1)}`,
+              meta: `Valore: ${euro(
+                Number(quote.total ?? quote.amount ?? quote.value ?? 0)
+              )}`,
+            }))
+          )}
       </div>
-    </div>
+    </main>
   );
 }
