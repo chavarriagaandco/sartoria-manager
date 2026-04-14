@@ -6,18 +6,13 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 type TabKey = "dashboard" | "clienti" | "misure" | "ordini" | "preventivi";
 
 type ClientRecord = {
-  id?: string | number;
+  id?: string;
   created_at?: string;
   name?: string;
-  full_name?: string;
-  nome?: string;
   city?: string;
-  citta?: string;
   phone?: string;
-  telefono?: string;
   email?: string;
   notes?: string;
-  note?: string;
   chest?: string;
   waist?: string;
   hip?: string;
@@ -30,27 +25,34 @@ type ClientRecord = {
 };
 
 type OrderRecord = {
-  id?: string | number;
-  created_at?: string;
+  id?: string;
+  client_id?: string;
+  garment?: string;
+  construction?: string;
   status?: string;
-  total?: number;
-  amount?: number;
-  value?: number;
-  acconto?: number;
-  deposit?: number;
+  price?: number | null;
+  advance?: number | null;
+  notes?: string | null;
+  due_date?: string | null;
+  created_at?: string;
   [key: string]: unknown;
 };
 
 type QuoteRecord = {
-  id?: string | number;
+  id?: string;
+  client_id?: string;
+  garment?: string;
+  description?: string | null;
+  base_price?: number | null;
+  extras?: number | null;
+  deposit?: number | null;
+  total?: number | null;
+  status?: string | null;
   created_at?: string;
-  total?: number;
-  amount?: number;
-  value?: number;
   [key: string]: unknown;
 };
 
-type FormState = {
+type ClientFormState = {
   name: string;
   city: string;
   phone: string;
@@ -66,7 +68,29 @@ type FormState = {
   outseam: string;
 };
 
-const initialForm: FormState = {
+type OrderFormState = {
+  client_id: string;
+  garment: string;
+  construction: string;
+  status: string;
+  price: string;
+  advance: string;
+  notes: string;
+  due_date: string;
+};
+
+type QuoteFormState = {
+  client_id: string;
+  garment: string;
+  description: string;
+  base_price: string;
+  extras: string;
+  deposit: string;
+  total: string;
+  status: string;
+};
+
+const initialClientForm: ClientFormState = {
   name: "",
   city: "",
   phone: "",
@@ -82,6 +106,28 @@ const initialForm: FormState = {
   outseam: "",
 };
 
+const initialOrderForm: OrderFormState = {
+  client_id: "",
+  garment: "",
+  construction: "",
+  status: "Aperto",
+  price: "",
+  advance: "",
+  notes: "",
+  due_date: "",
+};
+
+const initialQuoteForm: QuoteFormState = {
+  client_id: "",
+  garment: "",
+  description: "",
+  base_price: "",
+  extras: "",
+  deposit: "",
+  total: "",
+  status: "Bozza",
+};
+
 const todayTasksDefault = [
   "Controllare gli ordini in stato Prova",
   "Registrare gli acconti ricevuti",
@@ -95,16 +141,22 @@ function euro(value: number) {
   }).format(value || 0);
 }
 
+function toNumberOrNull(value: string) {
+  if (!value.trim()) return null;
+  const parsed = Number(value.replace(",", "."));
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 function getClientName(client: ClientRecord) {
-  return String(client.name || client.full_name || client.nome || "Nuovo cliente");
+  return String(client.name || "Nuovo cliente");
 }
 
 function getClientCity(client: ClientRecord) {
-  return String(client.city || client.citta || "");
+  return String(client.city || "");
 }
 
 function getClientPhone(client: ClientRecord) {
-  return String(client.phone || client.telefono || "");
+  return String(client.phone || "");
 }
 
 function getClientEmail(client: ClientRecord) {
@@ -112,7 +164,7 @@ function getClientEmail(client: ClientRecord) {
 }
 
 function getClientNotes(client: ClientRecord) {
-  return String(client.notes || client.note || "");
+  return String(client.notes || "");
 }
 
 function getMeasure(client: ClientRecord, key: keyof ClientRecord) {
@@ -143,15 +195,25 @@ export default function Page() {
   const [isMobile, setIsMobile] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
   const [loading, setLoading] = useState(true);
-  const [savingClient, setSavingClient] = useState(false);
+
   const [error, setError] = useState("");
+
   const [clients, setClients] = useState<ClientRecord[]>([]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [quotes, setQuotes] = useState<QuoteRecord[]>([]);
+
+  const [savingClient, setSavingClient] = useState(false);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [savingQuote, setSavingQuote] = useState(false);
+
   const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(null);
   const [showClientEditor, setShowClientEditor] = useState(false);
+
   const [clientSearch, setClientSearch] = useState("");
-  const [form, setForm] = useState<FormState>(initialForm);
+  const [clientForm, setClientForm] = useState<ClientFormState>(initialClientForm);
+  const [orderForm, setOrderForm] = useState<OrderFormState>(initialOrderForm);
+  const [quoteForm, setQuoteForm] = useState<QuoteFormState>(initialQuoteForm);
+
   const [taskInput, setTaskInput] = useState("");
   const [tasks, setTasks] = useState<string[]>(todayTasksDefault);
 
@@ -222,7 +284,8 @@ export default function Page() {
         setError("");
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Caricamento non riuscito.";
+      const message =
+        err instanceof Error ? err.message : "Caricamento non riuscito.";
       setError(`Errore: ${message}`);
     } finally {
       setLoading(false);
@@ -231,14 +294,14 @@ export default function Page() {
 
   function openNewClient() {
     setSelectedClient(null);
-    setForm(initialForm);
+    setClientForm(initialClientForm);
     setShowClientEditor(true);
     setActiveTab("clienti");
   }
 
   function openClient(client: ClientRecord) {
     setSelectedClient(client);
-    setForm({
+    setClientForm({
       name: getClientName(client),
       city: getClientCity(client),
       phone: getClientPhone(client),
@@ -267,19 +330,19 @@ export default function Page() {
     setError("");
 
     const payload = {
-      name: form.name.trim() || "Cliente senza nome",
-      city: form.city.trim() || null,
-      phone: form.phone.trim() || null,
-      email: form.email.trim() || null,
-      notes: form.notes.trim() || null,
-      chest: form.chest.trim() || null,
-      waist: form.waist.trim() || null,
-      hip: form.hip.trim() || null,
-      shoulder: form.shoulder.trim() || null,
-      sleeve: form.sleeve.trim() || null,
-      neck: form.neck.trim() || null,
-      inseam: form.inseam.trim() || null,
-      outseam: form.outseam.trim() || null,
+      name: clientForm.name.trim() || "Cliente senza nome",
+      city: clientForm.city.trim() || null,
+      phone: clientForm.phone.trim() || null,
+      email: clientForm.email.trim() || null,
+      notes: clientForm.notes.trim() || null,
+      chest: clientForm.chest.trim() || null,
+      waist: clientForm.waist.trim() || null,
+      hip: clientForm.hip.trim() || null,
+      shoulder: clientForm.shoulder.trim() || null,
+      sleeve: clientForm.sleeve.trim() || null,
+      neck: clientForm.neck.trim() || null,
+      inseam: clientForm.inseam.trim() || null,
+      outseam: clientForm.outseam.trim() || null,
     };
 
     try {
@@ -313,30 +376,129 @@ export default function Page() {
         setShowClientEditor(false);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Salvataggio non riuscito.";
+      const message =
+        err instanceof Error ? err.message : "Salvataggio non riuscito.";
       setError(`Errore: ${message}`);
     } finally {
       setSavingClient(false);
     }
   }
 
+  async function saveOrder() {
+    if (!supabase) {
+      setError("Supabase non configurato.");
+      return;
+    }
+
+    if (!orderForm.client_id) {
+      setError("Seleziona un cliente per l'ordine.");
+      return;
+    }
+
+    setSavingOrder(true);
+    setError("");
+
+    const payload = {
+      client_id: orderForm.client_id,
+      garment: orderForm.garment.trim() || null,
+      construction: orderForm.construction.trim() || null,
+      status: orderForm.status.trim() || null,
+      price: toNumberOrNull(orderForm.price),
+      advance: toNumberOrNull(orderForm.advance),
+      notes: orderForm.notes.trim() || null,
+      due_date: orderForm.due_date || null,
+    };
+
+    try {
+      const result = await supabase.from("orders").insert(payload).select().single();
+
+      if (result.error) {
+        console.error("Supabase save order error:", result.error);
+        throw new Error(result.error.message);
+      }
+
+      setOrderForm(initialOrderForm);
+      await loadAllData(true);
+      setActiveTab("ordini");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Salvataggio ordine non riuscito.";
+      setError(`Errore: ${message}`);
+    } finally {
+      setSavingOrder(false);
+    }
+  }
+
+  async function saveQuote() {
+    if (!supabase) {
+      setError("Supabase non configurato.");
+      return;
+    }
+
+    if (!quoteForm.client_id) {
+      setError("Seleziona un cliente per il preventivo.");
+      return;
+    }
+
+    setSavingQuote(true);
+    setError("");
+
+    const payload = {
+      client_id: quoteForm.client_id,
+      garment: quoteForm.garment.trim() || null,
+      description: quoteForm.description.trim() || null,
+      base_price: toNumberOrNull(quoteForm.base_price),
+      extras: toNumberOrNull(quoteForm.extras),
+      deposit: toNumberOrNull(quoteForm.deposit),
+      total: toNumberOrNull(quoteForm.total),
+      status: quoteForm.status.trim() || null,
+    };
+
+    try {
+      const result = await supabase.from("quotes").insert(payload).select().single();
+
+      if (result.error) {
+        console.error("Supabase save quote error:", result.error);
+        throw new Error(result.error.message);
+      }
+
+      setQuoteForm(initialQuoteForm);
+      await loadAllData(true);
+      setActiveTab("preventivi");
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Salvataggio preventivo non riuscito.";
+      setError(`Errore: ${message}`);
+    } finally {
+      setSavingQuote(false);
+    }
+  }
+
   const filteredClients = clients.filter((client) => {
-    const haystack = `${getClientName(client)} ${getClientCity(client)} ${getClientPhone(client)} ${getClientEmail(client)}`
-      .toLowerCase()
-      .trim();
+    const haystack =
+      `${getClientName(client)} ${getClientCity(client)} ${getClientPhone(client)} ${getClientEmail(client)}`
+        .toLowerCase()
+        .trim();
     return haystack.includes(clientSearch.toLowerCase().trim());
   });
 
   const openOrdersCount = orders.filter(isOrderOpen).length;
+
   const totalOrderValue = orders.reduce((sum, order) => {
-    const value = Number(order.total ?? order.amount ?? order.value ?? 0);
+    const value = Number(order.price ?? 0);
     return sum + (Number.isFinite(value) ? value : 0);
   }, 0);
 
   const totalDeposits = orders.reduce((sum, order) => {
-    const value = Number(order.acconto ?? order.deposit ?? 0);
+    const value = Number(order.advance ?? 0);
     return sum + (Number.isFinite(value) ? value : 0);
   }, 0);
+
+  function clientNameById(id?: string) {
+    if (!id) return "Cliente";
+    const client = clients.find((c) => c.id === id);
+    return client ? getClientName(client) : "Cliente";
+  }
 
   const styles = {
     page: {
@@ -553,6 +715,18 @@ export default function Page() {
       fontSize: 14,
       color: "#8a847d",
     } as const,
+    select: {
+      width: "100%",
+      borderRadius: 999,
+      border: "1px solid #ddd4c8",
+      background: "#fff",
+      padding: "14px 16px",
+      fontSize: 16,
+      outline: "none",
+      color: "#1a1a1a",
+      boxSizing: "border-box" as const,
+      appearance: "none" as const,
+    },
   };
 
   function renderDashboard() {
@@ -567,10 +741,10 @@ export default function Page() {
               orders.filter(isOrderOpen).slice(0, 6).map((order, index) => (
                 <div key={String(order.id ?? index)} style={styles.clientItem}>
                   <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                    Ordine #{String(order.id ?? index + 1)}
+                    {String(order.garment || `Ordine #${index + 1}`)}
                   </div>
                   <div style={styles.helper}>
-                    Stato: {String(order.status || "Aperto")}
+                    {clientNameById(order.client_id)} · {String(order.status || "Aperto")}
                   </div>
                 </div>
               ))
@@ -580,7 +754,6 @@ export default function Page() {
 
         <div style={styles.panel}>
           <h2 style={styles.panelTitle}>Focus di oggi</h2>
-
           <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
             <input
               style={styles.input}
@@ -647,8 +820,10 @@ export default function Page() {
                 <label style={styles.label}>Nome</label>
                 <input
                   style={styles.input}
-                  value={form.name}
-                  onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
+                  value={clientForm.name}
+                  onChange={(e) =>
+                    setClientForm((prev) => ({ ...prev, name: e.target.value }))
+                  }
                   placeholder="Nome cliente"
                 />
               </div>
@@ -657,8 +832,10 @@ export default function Page() {
                 <label style={styles.label}>Città</label>
                 <input
                   style={styles.input}
-                  value={form.city}
-                  onChange={(e) => setForm((prev) => ({ ...prev, city: e.target.value }))}
+                  value={clientForm.city}
+                  onChange={(e) =>
+                    setClientForm((prev) => ({ ...prev, city: e.target.value }))
+                  }
                   placeholder="Città"
                 />
               </div>
@@ -667,8 +844,10 @@ export default function Page() {
                 <label style={styles.label}>Telefono</label>
                 <input
                   style={styles.input}
-                  value={form.phone}
-                  onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
+                  value={clientForm.phone}
+                  onChange={(e) =>
+                    setClientForm((prev) => ({ ...prev, phone: e.target.value }))
+                  }
                   placeholder="Telefono"
                 />
               </div>
@@ -677,8 +856,10 @@ export default function Page() {
                 <label style={styles.label}>Email</label>
                 <input
                   style={styles.input}
-                  value={form.email}
-                  onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
+                  value={clientForm.email}
+                  onChange={(e) =>
+                    setClientForm((prev) => ({ ...prev, email: e.target.value }))
+                  }
                   placeholder="Email"
                 />
               </div>
@@ -688,8 +869,10 @@ export default function Page() {
               <label style={styles.label}>Note</label>
               <textarea
                 style={styles.textarea}
-                value={form.notes}
-                onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+                value={clientForm.notes}
+                onChange={(e) =>
+                  setClientForm((prev) => ({ ...prev, notes: e.target.value }))
+                }
                 placeholder="Note cliente"
               />
             </div>
@@ -721,9 +904,9 @@ export default function Page() {
                   <label style={styles.label}>{label}</label>
                   <input
                     style={styles.input}
-                    value={form[key as keyof FormState]}
+                    value={clientForm[key as keyof ClientFormState]}
                     onChange={(e) =>
-                      setForm((prev) => ({
+                      setClientForm((prev) => ({
                         ...prev,
                         [key]: e.target.value,
                       }))
@@ -734,14 +917,7 @@ export default function Page() {
               ))}
             </div>
 
-            <div
-              style={{
-                display: "flex",
-                gap: 12,
-                marginTop: 24,
-                flexWrap: "wrap",
-              }}
-            >
+            <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap" }}>
               <button
                 style={{
                   ...styles.buttonDark,
@@ -755,10 +931,7 @@ export default function Page() {
               </button>
 
               <button
-                style={{
-                  ...styles.button,
-                  width: isMobile ? "100%" : "auto",
-                }}
+                style={{ ...styles.button, width: isMobile ? "100%" : "auto" }}
                 onClick={() => setShowClientEditor(false)}
               >
                 Chiudi
@@ -840,18 +1013,327 @@ export default function Page() {
     );
   }
 
-  function renderSimplePanel(title: string, rows: Array<{ title: string; meta?: string }>) {
+  function renderOrdini() {
+    return (
+      <div style={styles.sectionGrid}>
+        <div style={styles.panel}>
+          <div style={styles.rowBetween}>
+            <h2 style={styles.panelTitle}>Nuovo ordine</h2>
+          </div>
+
+          <div style={styles.fieldBlock}>
+            <label style={styles.label}>Cliente</label>
+            <select
+              style={styles.select}
+              value={orderForm.client_id}
+              onChange={(e) =>
+                setOrderForm((prev) => ({ ...prev, client_id: e.target.value }))
+              }
+            >
+              <option value="">Seleziona cliente</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {getClientName(client)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={styles.fieldGrid}>
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Garment</label>
+              <input
+                style={styles.input}
+                value={orderForm.garment}
+                onChange={(e) =>
+                  setOrderForm((prev) => ({ ...prev, garment: e.target.value }))
+                }
+                placeholder="Es. Giacca"
+              />
+            </div>
+
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Status</label>
+              <input
+                style={styles.input}
+                value={orderForm.status}
+                onChange={(e) =>
+                  setOrderForm((prev) => ({ ...prev, status: e.target.value }))
+                }
+                placeholder="Aperto / Prova / Consegnato"
+              />
+            </div>
+
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Construction</label>
+              <input
+                style={styles.input}
+                value={orderForm.construction}
+                onChange={(e) =>
+                  setOrderForm((prev) => ({ ...prev, construction: e.target.value }))
+                }
+                placeholder="Es. Su misura"
+              />
+            </div>
+
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Due date</label>
+              <input
+                type="date"
+                style={styles.input}
+                value={orderForm.due_date}
+                onChange={(e) =>
+                  setOrderForm((prev) => ({ ...prev, due_date: e.target.value }))
+                }
+              />
+            </div>
+
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Price</label>
+              <input
+                style={styles.input}
+                value={orderForm.price}
+                onChange={(e) =>
+                  setOrderForm((prev) => ({ ...prev, price: e.target.value }))
+                }
+                placeholder="0"
+              />
+            </div>
+
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Advance</label>
+              <input
+                style={styles.input}
+                value={orderForm.advance}
+                onChange={(e) =>
+                  setOrderForm((prev) => ({ ...prev, advance: e.target.value }))
+                }
+                placeholder="0"
+              />
+            </div>
+          </div>
+
+          <div style={styles.fieldBlock}>
+            <label style={styles.label}>Notes</label>
+            <textarea
+              style={styles.textarea}
+              value={orderForm.notes}
+              onChange={(e) =>
+                setOrderForm((prev) => ({ ...prev, notes: e.target.value }))
+              }
+              placeholder="Note ordine"
+            />
+          </div>
+
+          <button
+            style={{
+              ...styles.buttonDark,
+              width: isMobile ? "100%" : "auto",
+              opacity: savingOrder ? 0.7 : 1,
+            }}
+            onClick={() => void saveOrder()}
+            disabled={savingOrder}
+          >
+            {savingOrder ? "Salvataggio..." : "Salva ordine"}
+          </button>
+        </div>
+
+        <div style={styles.panel}>
+          <h2 style={styles.panelTitle}>Ordini</h2>
+          <div style={styles.list}>
+            {orders.length === 0 ? (
+              <div style={styles.muted}>Nessun elemento disponibile.</div>
+            ) : (
+              orders.map((order, idx) => (
+                <div key={String(order.id ?? idx)} style={styles.clientItem}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                    {String(order.garment || `Ordine #${idx + 1}`)}
+                  </div>
+                  <div style={styles.helper}>
+                    {clientNameById(order.client_id)} · {String(order.status || "Aperto")}
+                  </div>
+                  <div style={{ ...styles.helper, marginTop: 6 }}>
+                    {euro(Number(order.price ?? 0))} · Acconto {euro(Number(order.advance ?? 0))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderPreventivi() {
+    return (
+      <div style={styles.sectionGrid}>
+        <div style={styles.panel}>
+          <h2 style={styles.panelTitle}>Nuovo preventivo</h2>
+
+          <div style={styles.fieldBlock}>
+            <label style={styles.label}>Cliente</label>
+            <select
+              style={styles.select}
+              value={quoteForm.client_id}
+              onChange={(e) =>
+                setQuoteForm((prev) => ({ ...prev, client_id: e.target.value }))
+              }
+            >
+              <option value="">Seleziona cliente</option>
+              {clients.map((client) => (
+                <option key={client.id} value={client.id}>
+                  {getClientName(client)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={styles.fieldGrid}>
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Garment</label>
+              <input
+                style={styles.input}
+                value={quoteForm.garment}
+                onChange={(e) =>
+                  setQuoteForm((prev) => ({ ...prev, garment: e.target.value }))
+                }
+                placeholder="Es. Cappotto"
+              />
+            </div>
+
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Status</label>
+              <input
+                style={styles.input}
+                value={quoteForm.status}
+                onChange={(e) =>
+                  setQuoteForm((prev) => ({ ...prev, status: e.target.value }))
+                }
+                placeholder="Bozza / Inviato / Accettato"
+              />
+            </div>
+
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Base price</label>
+              <input
+                style={styles.input}
+                value={quoteForm.base_price}
+                onChange={(e) =>
+                  setQuoteForm((prev) => ({ ...prev, base_price: e.target.value }))
+                }
+                placeholder="0"
+              />
+            </div>
+
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Extras</label>
+              <input
+                style={styles.input}
+                value={quoteForm.extras}
+                onChange={(e) =>
+                  setQuoteForm((prev) => ({ ...prev, extras: e.target.value }))
+                }
+                placeholder="0"
+              />
+            </div>
+
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Deposit</label>
+              <input
+                style={styles.input}
+                value={quoteForm.deposit}
+                onChange={(e) =>
+                  setQuoteForm((prev) => ({ ...prev, deposit: e.target.value }))
+                }
+                placeholder="0"
+              />
+            </div>
+
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Total</label>
+              <input
+                style={styles.input}
+                value={quoteForm.total}
+                onChange={(e) =>
+                  setQuoteForm((prev) => ({ ...prev, total: e.target.value }))
+                }
+                placeholder="0"
+              />
+            </div>
+          </div>
+
+          <div style={styles.fieldBlock}>
+            <label style={styles.label}>Description</label>
+            <textarea
+              style={styles.textarea}
+              value={quoteForm.description}
+              onChange={(e) =>
+                setQuoteForm((prev) => ({ ...prev, description: e.target.value }))
+              }
+              placeholder="Descrizione preventivo"
+            />
+          </div>
+
+          <button
+            style={{
+              ...styles.buttonDark,
+              width: isMobile ? "100%" : "auto",
+              opacity: savingQuote ? 0.7 : 1,
+            }}
+            onClick={() => void saveQuote()}
+            disabled={savingQuote}
+          >
+            {savingQuote ? "Salvataggio..." : "Salva preventivo"}
+          </button>
+        </div>
+
+        <div style={styles.panel}>
+          <h2 style={styles.panelTitle}>Preventivi</h2>
+          <div style={styles.list}>
+            {quotes.length === 0 ? (
+              <div style={styles.muted}>Nessun elemento disponibile.</div>
+            ) : (
+              quotes.map((quote, idx) => (
+                <div key={String(quote.id ?? idx)} style={styles.clientItem}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                    {String(quote.garment || `Preventivo #${idx + 1}`)}
+                  </div>
+                  <div style={styles.helper}>
+                    {clientNameById(quote.client_id)} · {String(quote.status || "Bozza")}
+                  </div>
+                  <div style={{ ...styles.helper, marginTop: 6 }}>
+                    Totale {euro(Number(quote.total ?? 0))}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderMisure() {
     return (
       <div style={styles.panel}>
-        <h2 style={styles.panelTitle}>{title}</h2>
+        <h2 style={styles.panelTitle}>Misure</h2>
         <div style={styles.list}>
-          {rows.length === 0 ? (
+          {clients.length === 0 ? (
             <div style={styles.muted}>Nessun elemento disponibile.</div>
           ) : (
-            rows.map((row, idx) => (
-              <div key={`${row.title}-${idx}`} style={styles.clientItem}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>{row.title}</div>
-                {row.meta ? <div style={styles.helper}>{row.meta}</div> : null}
+            clients.map((client) => (
+              <div key={String(client.id)} style={styles.clientItem}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>{getClientName(client)}</div>
+                <div style={styles.helper}>
+                  {[
+                    client.chest ? `Chest ${client.chest}` : "",
+                    client.waist ? `Waist ${client.waist}` : "",
+                    client.hip ? `Hip ${client.hip}` : "",
+                    client.outseam ? `Outseam ${client.outseam}` : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
               </div>
             ))
           )}
@@ -868,10 +1350,16 @@ export default function Page() {
         <div style={styles.titleRow}>
           <div>
             <h1 style={styles.h1}>Sartoria Manager</h1>
-            <div style={styles.subtitle}>Versione premium sincronizzata con Supabase.</div>
+            <div style={styles.subtitle}>
+              Versione premium sincronizzata con Supabase.
+            </div>
           </div>
 
-          <button style={styles.button} onClick={() => void loadAllData(true)} disabled={loading}>
+          <button
+            style={styles.button}
+            onClick={() => void loadAllData(true)}
+            disabled={loading}
+          >
             {loading ? "Caricamento..." : "Ricarica dati"}
           </button>
         </div>
@@ -920,37 +1408,9 @@ export default function Page() {
 
         {activeTab === "dashboard" && renderDashboard()}
         {activeTab === "clienti" && renderClienti()}
-        {activeTab === "misure" &&
-          renderSimplePanel(
-            "Misure",
-            clients.map((client) => ({
-              title: getClientName(client),
-              meta: [
-                client.chest ? `Chest ${client.chest}` : "",
-                client.waist ? `Waist ${client.waist}` : "",
-                client.hip ? `Hip ${client.hip}` : "",
-                client.outseam ? `Outseam ${client.outseam}` : "",
-              ]
-                .filter(Boolean)
-                .join(" · "),
-            }))
-          )}
-        {activeTab === "ordini" &&
-          renderSimplePanel(
-            "Ordini",
-            orders.map((order, idx) => ({
-              title: `Ordine #${String(order.id ?? idx + 1)}`,
-              meta: `Stato: ${String(order.status || "Aperto")}`,
-            }))
-          )}
-        {activeTab === "preventivi" &&
-          renderSimplePanel(
-            "Preventivi",
-            quotes.map((quote, idx) => ({
-              title: `Preventivo #${String(quote.id ?? idx + 1)}`,
-              meta: `Valore: ${euro(Number(quote.total ?? quote.amount ?? quote.value ?? 0))}`,
-            }))
-          )}
+        {activeTab === "misure" && renderMisure()}
+        {activeTab === "ordini" && renderOrdini()}
+        {activeTab === "preventivi" && renderPreventivi()}
       </div>
     </main>
   );
