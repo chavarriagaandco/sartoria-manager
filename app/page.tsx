@@ -206,6 +206,10 @@ export default function Page() {
   const [savingOrder, setSavingOrder] = useState(false);
   const [savingQuote, setSavingQuote] = useState(false);
 
+  const [deletingClientId, setDeletingClientId] = useState<string | null>(null);
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+  const [deletingQuoteId, setDeletingQuoteId] = useState<string | null>(null);
+
   const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(null);
   const [showClientEditor, setShowClientEditor] = useState(false);
 
@@ -474,6 +478,90 @@ export default function Page() {
     }
   }
 
+  async function deleteClient(id?: string) {
+    if (!supabase || !id) return;
+    const confirmed = window.confirm("Vuoi eliminare questo cliente?");
+    if (!confirmed) return;
+
+    setDeletingClientId(id);
+    setError("");
+
+    try {
+      const result = await supabase.from("clients").delete().eq("id", id);
+
+      if (result.error) {
+        console.error("Supabase delete client error:", result.error);
+        throw new Error(result.error.message);
+      }
+
+      if (selectedClient?.id === id) {
+        setSelectedClient(null);
+        setShowClientEditor(false);
+        setClientForm(initialClientForm);
+      }
+
+      await loadAllData(true);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Eliminazione cliente non riuscita.";
+      setError(`Errore: ${message}`);
+    } finally {
+      setDeletingClientId(null);
+    }
+  }
+
+  async function deleteOrder(id?: string) {
+    if (!supabase || !id) return;
+    const confirmed = window.confirm("Vuoi eliminare questo ordine?");
+    if (!confirmed) return;
+
+    setDeletingOrderId(id);
+    setError("");
+
+    try {
+      const result = await supabase.from("orders").delete().eq("id", id);
+
+      if (result.error) {
+        console.error("Supabase delete order error:", result.error);
+        throw new Error(result.error.message);
+      }
+
+      await loadAllData(true);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Eliminazione ordine non riuscita.";
+      setError(`Errore: ${message}`);
+    } finally {
+      setDeletingOrderId(null);
+    }
+  }
+
+  async function deleteQuote(id?: string) {
+    if (!supabase || !id) return;
+    const confirmed = window.confirm("Vuoi eliminare questo preventivo?");
+    if (!confirmed) return;
+
+    setDeletingQuoteId(id);
+    setError("");
+
+    try {
+      const result = await supabase.from("quotes").delete().eq("id", id);
+
+      if (result.error) {
+        console.error("Supabase delete quote error:", result.error);
+        throw new Error(result.error.message);
+      }
+
+      await loadAllData(true);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Eliminazione preventivo non riuscita.";
+      setError(`Errore: ${message}`);
+    } finally {
+      setDeletingQuoteId(null);
+    }
+  }
+
   const filteredClients = clients.filter((client) => {
     const haystack =
       `${getClientName(client)} ${getClientCity(client)} ${getClientPhone(client)} ${getClientEmail(client)}`
@@ -555,6 +643,16 @@ export default function Page() {
       color: "#fff",
       padding: "14px 22px",
       fontSize: 16,
+      cursor: "pointer",
+      whiteSpace: "nowrap" as const,
+    },
+    buttonDanger: {
+      borderRadius: 999,
+      border: "1px solid #d8b1ad",
+      background: "#fff",
+      color: "#c44334",
+      padding: "10px 16px",
+      fontSize: 14,
       cursor: "pointer",
       whiteSpace: "nowrap" as const,
     },
@@ -740,11 +838,21 @@ export default function Page() {
             ) : (
               orders.filter(isOrderOpen).slice(0, 6).map((order, index) => (
                 <div key={String(order.id ?? index)} style={styles.clientItem}>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                    {String(order.garment || `Ordine #${index + 1}`)}
-                  </div>
-                  <div style={styles.helper}>
-                    {clientNameById(order.client_id)} · {String(order.status || "Aperto")}
+                  <div style={styles.rowBetween}>
+                    <div>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                        {String(order.garment || `Ordine #${index + 1}`)}
+                      </div>
+                      <div style={styles.helper}>
+                        {clientNameById(order.client_id)} · {String(order.status || "Aperto")}
+                      </div>
+                    </div>
+                    <button
+                      style={styles.buttonDanger}
+                      onClick={() => void deleteOrder(order.id)}
+                    >
+                      {deletingOrderId === order.id ? "Elimino..." : "Elimina"}
+                    </button>
                   </div>
                 </div>
               ))
@@ -930,6 +1038,18 @@ export default function Page() {
                 {savingClient ? "Salvataggio..." : "Salva cliente"}
               </button>
 
+              {selectedClient?.id ? (
+                <button
+                  style={{
+                    ...styles.buttonDanger,
+                    width: isMobile ? "100%" : "auto",
+                  }}
+                  onClick={() => void deleteClient(selectedClient.id)}
+                >
+                  {deletingClientId === selectedClient.id ? "Elimino..." : "Elimina"}
+                </button>
+              ) : null}
+
               <button
                 style={{ ...styles.button, width: isMobile ? "100%" : "auto" }}
                 onClick={() => setShowClientEditor(false)}
@@ -982,24 +1102,38 @@ export default function Page() {
                     style={active ? styles.clientItemActive : styles.clientItem}
                     onClick={() => openClient(client)}
                   >
-                    <div
-                      style={{
-                        fontSize: 13,
-                        letterSpacing: "0.22em",
-                        textTransform: "uppercase",
-                        color: "#8a847d",
-                        marginBottom: 8,
-                      }}
-                    >
-                      Cliente
-                    </div>
-                    <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>
-                      {getClientName(client)}
-                    </div>
-                    <div style={styles.helper}>
-                      {[getClientCity(client), getClientPhone(client), getClientEmail(client)]
-                        .filter(Boolean)
-                        .join(" · ")}
+                    <div style={styles.rowBetween}>
+                      <div>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            letterSpacing: "0.22em",
+                            textTransform: "uppercase",
+                            color: "#8a847d",
+                            marginBottom: 8,
+                          }}
+                        >
+                          Cliente
+                        </div>
+                        <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 6 }}>
+                          {getClientName(client)}
+                        </div>
+                        <div style={styles.helper}>
+                          {[getClientCity(client), getClientPhone(client), getClientEmail(client)]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </div>
+                      </div>
+
+                      <button
+                        style={styles.buttonDanger}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void deleteClient(client.id);
+                        }}
+                      >
+                        {deletingClientId === client.id ? "Elimino..." : "Elimina"}
+                      </button>
                     </div>
                   </div>
                 );
@@ -1146,14 +1280,25 @@ export default function Page() {
             ) : (
               orders.map((order, idx) => (
                 <div key={String(order.id ?? idx)} style={styles.clientItem}>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                    {String(order.garment || `Ordine #${idx + 1}`)}
-                  </div>
-                  <div style={styles.helper}>
-                    {clientNameById(order.client_id)} · {String(order.status || "Aperto")}
-                  </div>
-                  <div style={{ ...styles.helper, marginTop: 6 }}>
-                    {euro(Number(order.price ?? 0))} · Acconto {euro(Number(order.advance ?? 0))}
+                  <div style={styles.rowBetween}>
+                    <div>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                        {String(order.garment || `Ordine #${idx + 1}`)}
+                      </div>
+                      <div style={styles.helper}>
+                        {clientNameById(order.client_id)} · {String(order.status || "Aperto")}
+                      </div>
+                      <div style={{ ...styles.helper, marginTop: 6 }}>
+                        {euro(Number(order.price ?? 0))} · Acconto {euro(Number(order.advance ?? 0))}
+                      </div>
+                    </div>
+
+                    <button
+                      style={styles.buttonDanger}
+                      onClick={() => void deleteOrder(order.id)}
+                    >
+                      {deletingOrderId === order.id ? "Elimino..." : "Elimina"}
+                    </button>
                   </div>
                 </div>
               ))
@@ -1295,14 +1440,25 @@ export default function Page() {
             ) : (
               quotes.map((quote, idx) => (
                 <div key={String(quote.id ?? idx)} style={styles.clientItem}>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                    {String(quote.garment || `Preventivo #${idx + 1}`)}
-                  </div>
-                  <div style={styles.helper}>
-                    {clientNameById(quote.client_id)} · {String(quote.status || "Bozza")}
-                  </div>
-                  <div style={{ ...styles.helper, marginTop: 6 }}>
-                    Totale {euro(Number(quote.total ?? 0))}
+                  <div style={styles.rowBetween}>
+                    <div>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                        {String(quote.garment || `Preventivo #${idx + 1}`)}
+                      </div>
+                      <div style={styles.helper}>
+                        {clientNameById(quote.client_id)} · {String(quote.status || "Bozza")}
+                      </div>
+                      <div style={{ ...styles.helper, marginTop: 6 }}>
+                        Totale {euro(Number(quote.total ?? 0))}
+                      </div>
+                    </div>
+
+                    <button
+                      style={styles.buttonDanger}
+                      onClick={() => void deleteQuote(quote.id)}
+                    >
+                      {deletingQuoteId === quote.id ? "Elimino..." : "Elimina"}
+                    </button>
                   </div>
                 </div>
               ))
@@ -1323,16 +1479,27 @@ export default function Page() {
           ) : (
             clients.map((client) => (
               <div key={String(client.id)} style={styles.clientItem}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>{getClientName(client)}</div>
-                <div style={styles.helper}>
-                  {[
-                    client.chest ? `Chest ${client.chest}` : "",
-                    client.waist ? `Waist ${client.waist}` : "",
-                    client.hip ? `Hip ${client.hip}` : "",
-                    client.outseam ? `Outseam ${client.outseam}` : "",
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
+                <div style={styles.rowBetween}>
+                  <div>
+                    <div style={{ fontWeight: 700, marginBottom: 6 }}>{getClientName(client)}</div>
+                    <div style={styles.helper}>
+                      {[
+                        client.chest ? `Chest ${client.chest}` : "",
+                        client.waist ? `Waist ${client.waist}` : "",
+                        client.hip ? `Hip ${client.hip}` : "",
+                        client.outseam ? `Outseam ${client.outseam}` : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
+                  </div>
+
+                  <button
+                    style={styles.buttonDanger}
+                    onClick={() => void deleteClient(client.id)}
+                  >
+                    {deletingClientId === client.id ? "Elimino..." : "Elimina"}
+                  </button>
                 </div>
               </div>
             ))
