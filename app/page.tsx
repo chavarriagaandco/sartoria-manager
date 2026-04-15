@@ -195,7 +195,6 @@ export default function Page() {
   const [isMobile, setIsMobile] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
   const [loading, setLoading] = useState(true);
-
   const [error, setError] = useState("");
 
   const [clients, setClients] = useState<ClientRecord[]>([]);
@@ -213,13 +212,16 @@ export default function Page() {
   const [selectedClient, setSelectedClient] = useState<ClientRecord | null>(null);
   const [showClientEditor, setShowClientEditor] = useState(false);
 
+  const [selectedOrder, setSelectedOrder] = useState<OrderRecord | null>(null);
+  const [showOrderEditor, setShowOrderEditor] = useState(false);
+
   const [clientSearch, setClientSearch] = useState("");
   const [clientForm, setClientForm] = useState<ClientFormState>(initialClientForm);
   const [orderForm, setOrderForm] = useState<OrderFormState>(initialOrderForm);
   const [quoteForm, setQuoteForm] = useState<QuoteFormState>(initialQuoteForm);
 
   const [taskInput, setTaskInput] = useState("");
-  const [tasks, setTasks] = useState<string[]>(todayTasksDefault);
+  const [tasks, setTasks] = useState<string[]>([]);
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < 900);
@@ -227,6 +229,19 @@ export default function Page() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("tasks_today");
+    if (saved) {
+      setTasks(JSON.parse(saved));
+    } else {
+      setTasks(todayTasksDefault);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("tasks_today", JSON.stringify(tasks));
+  }, [tasks]);
 
   useEffect(() => {
     if (!supabase) {
@@ -296,6 +311,12 @@ export default function Page() {
     }
   }
 
+  function clientNameById(id?: string) {
+    if (!id) return "Cliente";
+    const client = clients.find((c) => c.id === id);
+    return client ? getClientName(client) : "Cliente";
+  }
+
   function openNewClient() {
     setSelectedClient(null);
     setClientForm(initialClientForm);
@@ -322,6 +343,30 @@ export default function Page() {
     });
     setShowClientEditor(true);
     setActiveTab("clienti");
+  }
+
+  function openNewOrder() {
+    setSelectedOrder(null);
+    setOrderForm(initialOrderForm);
+    setShowOrderEditor(true);
+    setActiveTab("ordini");
+  }
+
+  function openOrder(order: OrderRecord) {
+    setSelectedOrder(order);
+    setOrderForm({
+      client_id: String(order.client_id || ""),
+      garment: String(order.garment || ""),
+      construction: String(order.construction || ""),
+      status: String(order.status || "Aperto"),
+      price: order.price === null || order.price === undefined ? "" : String(order.price),
+      advance:
+        order.advance === null || order.advance === undefined ? "" : String(order.advance),
+      notes: String(order.notes || ""),
+      due_date: String(order.due_date || ""),
+    });
+    setShowOrderEditor(true);
+    setActiveTab("ordini");
   }
 
   async function saveClient() {
@@ -414,15 +459,32 @@ export default function Page() {
     };
 
     try {
-      const result = await supabase.from("orders").insert(payload).select().single();
+      let result;
+
+      if (selectedOrder?.id) {
+        result = await supabase
+          .from("orders")
+          .update(payload)
+          .eq("id", selectedOrder.id)
+          .select()
+          .single();
+      } else {
+        result = await supabase.from("orders").insert(payload).select().single();
+      }
 
       if (result.error) {
         console.error("Supabase save order error:", result.error);
         throw new Error(result.error.message);
       }
 
-      setOrderForm(initialOrderForm);
       await loadAllData(true);
+
+      if (result.data) {
+        openOrder(result.data as OrderRecord);
+      } else {
+        setShowOrderEditor(false);
+      }
+
       setActiveTab("ordini");
     } catch (err) {
       const message =
@@ -526,6 +588,12 @@ export default function Page() {
         throw new Error(result.error.message);
       }
 
+      if (selectedOrder?.id === id) {
+        setSelectedOrder(null);
+        setShowOrderEditor(false);
+        setOrderForm(initialOrderForm);
+      }
+
       await loadAllData(true);
     } catch (err) {
       const message =
@@ -581,12 +649,6 @@ export default function Page() {
     const value = Number(order.advance ?? 0);
     return sum + (Number.isFinite(value) ? value : 0);
   }, 0);
-
-  function clientNameById(id?: string) {
-    if (!id) return "Cliente";
-    const client = clients.find((c) => c.id === id);
-    return client ? getClientName(client) : "Cliente";
-  }
 
   const styles = {
     page: {
@@ -839,7 +901,10 @@ export default function Page() {
               orders.filter(isOrderOpen).slice(0, 6).map((order, index) => (
                 <div key={String(order.id ?? index)} style={styles.clientItem}>
                   <div style={styles.rowBetween}>
-                    <div>
+                    <div
+                      style={{ flex: 1, minWidth: 0, cursor: "pointer" }}
+                      onClick={() => openOrder(order)}
+                    >
                       <div style={{ fontWeight: 700, marginBottom: 6 }}>
                         {String(order.garment || `Ordine #${index + 1}`)}
                       </div>
@@ -1147,164 +1212,218 @@ export default function Page() {
     );
   }
 
+  function renderOrderEditor() {
+    return (
+      <div style={styles.panel}>
+        <h2 style={styles.panelTitle}>Scheda ordine</h2>
+
+        {!showOrderEditor && !selectedOrder ? (
+          <div style={styles.muted}>Seleziona un ordine.</div>
+        ) : (
+          <>
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Cliente</label>
+              <select
+                style={styles.select}
+                value={orderForm.client_id}
+                onChange={(e) =>
+                  setOrderForm((prev) => ({ ...prev, client_id: e.target.value }))
+                }
+              >
+                <option value="">Seleziona cliente</option>
+                {clients.map((client) => (
+                  <option key={client.id} value={client.id}>
+                    {getClientName(client)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={styles.fieldGrid}>
+              <div style={styles.fieldBlock}>
+                <label style={styles.label}>Garment</label>
+                <input
+                  style={styles.input}
+                  value={orderForm.garment}
+                  onChange={(e) =>
+                    setOrderForm((prev) => ({ ...prev, garment: e.target.value }))
+                  }
+                  placeholder="Es. Giacca"
+                />
+              </div>
+
+              <div style={styles.fieldBlock}>
+                <label style={styles.label}>Status</label>
+                <input
+                  style={styles.input}
+                  value={orderForm.status}
+                  onChange={(e) =>
+                    setOrderForm((prev) => ({ ...prev, status: e.target.value }))
+                  }
+                  placeholder="Aperto / Prova / Consegnato"
+                />
+              </div>
+
+              <div style={styles.fieldBlock}>
+                <label style={styles.label}>Construction</label>
+                <input
+                  style={styles.input}
+                  value={orderForm.construction}
+                  onChange={(e) =>
+                    setOrderForm((prev) => ({ ...prev, construction: e.target.value }))
+                  }
+                  placeholder="Es. Su misura"
+                />
+              </div>
+
+              <div style={styles.fieldBlock}>
+                <label style={styles.label}>Due date</label>
+                <input
+                  type="date"
+                  style={styles.input}
+                  value={orderForm.due_date}
+                  onChange={(e) =>
+                    setOrderForm((prev) => ({ ...prev, due_date: e.target.value }))
+                  }
+                />
+              </div>
+
+              <div style={styles.fieldBlock}>
+                <label style={styles.label}>Price</label>
+                <input
+                  style={styles.input}
+                  value={orderForm.price}
+                  onChange={(e) =>
+                    setOrderForm((prev) => ({ ...prev, price: e.target.value }))
+                  }
+                  placeholder="0"
+                />
+              </div>
+
+              <div style={styles.fieldBlock}>
+                <label style={styles.label}>Advance</label>
+                <input
+                  style={styles.input}
+                  value={orderForm.advance}
+                  onChange={(e) =>
+                    setOrderForm((prev) => ({ ...prev, advance: e.target.value }))
+                  }
+                  placeholder="0"
+                />
+              </div>
+            </div>
+
+            <div style={styles.fieldBlock}>
+              <label style={styles.label}>Notes</label>
+              <textarea
+                style={styles.textarea}
+                value={orderForm.notes}
+                onChange={(e) =>
+                  setOrderForm((prev) => ({ ...prev, notes: e.target.value }))
+                }
+                placeholder="Note ordine"
+              />
+            </div>
+
+            <div style={{ display: "flex", gap: 12, marginTop: 24, flexWrap: "wrap" }}>
+              <button
+                style={{
+                  ...styles.buttonDark,
+                  width: isMobile ? "100%" : "auto",
+                  opacity: savingOrder ? 0.7 : 1,
+                }}
+                onClick={() => void saveOrder()}
+                disabled={savingOrder}
+              >
+                {savingOrder ? "Salvataggio..." : selectedOrder?.id ? "Salva modifiche" : "Salva ordine"}
+              </button>
+
+              {selectedOrder?.id ? (
+                <button
+                  style={{
+                    ...styles.buttonDanger,
+                    width: isMobile ? "100%" : "auto",
+                  }}
+                  onClick={() => void deleteOrder(selectedOrder.id)}
+                >
+                  {deletingOrderId === selectedOrder.id ? "Elimino..." : "Elimina"}
+                </button>
+              ) : null}
+
+              <button
+                style={{ ...styles.button, width: isMobile ? "100%" : "auto" }}
+                onClick={() => setShowOrderEditor(false)}
+              >
+                Chiudi
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
   function renderOrdini() {
     return (
-      <div style={styles.sectionGrid}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "1fr" : "0.92fr 1.08fr",
+          gap: 20,
+          alignItems: "start",
+        }}
+      >
         <div style={styles.panel}>
           <div style={styles.rowBetween}>
-            <h2 style={styles.panelTitle}>Nuovo ordine</h2>
+            <h2 style={styles.panelTitle}>Ordini</h2>
+            <button style={styles.buttonDark} onClick={openNewOrder}>
+              Nuovo ordine
+            </button>
           </div>
 
-          <div style={styles.fieldBlock}>
-            <label style={styles.label}>Cliente</label>
-            <select
-              style={styles.select}
-              value={orderForm.client_id}
-              onChange={(e) =>
-                setOrderForm((prev) => ({ ...prev, client_id: e.target.value }))
-              }
-            >
-              <option value="">Seleziona cliente</option>
-              {clients.map((client) => (
-                <option key={client.id} value={client.id}>
-                  {getClientName(client)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div style={styles.fieldGrid}>
-            <div style={styles.fieldBlock}>
-              <label style={styles.label}>Garment</label>
-              <input
-                style={styles.input}
-                value={orderForm.garment}
-                onChange={(e) =>
-                  setOrderForm((prev) => ({ ...prev, garment: e.target.value }))
-                }
-                placeholder="Es. Giacca"
-              />
-            </div>
-
-            <div style={styles.fieldBlock}>
-              <label style={styles.label}>Status</label>
-              <input
-                style={styles.input}
-                value={orderForm.status}
-                onChange={(e) =>
-                  setOrderForm((prev) => ({ ...prev, status: e.target.value }))
-                }
-                placeholder="Aperto / Prova / Consegnato"
-              />
-            </div>
-
-            <div style={styles.fieldBlock}>
-              <label style={styles.label}>Construction</label>
-              <input
-                style={styles.input}
-                value={orderForm.construction}
-                onChange={(e) =>
-                  setOrderForm((prev) => ({ ...prev, construction: e.target.value }))
-                }
-                placeholder="Es. Su misura"
-              />
-            </div>
-
-            <div style={styles.fieldBlock}>
-              <label style={styles.label}>Due date</label>
-              <input
-                type="date"
-                style={styles.input}
-                value={orderForm.due_date}
-                onChange={(e) =>
-                  setOrderForm((prev) => ({ ...prev, due_date: e.target.value }))
-                }
-              />
-            </div>
-
-            <div style={styles.fieldBlock}>
-              <label style={styles.label}>Price</label>
-              <input
-                style={styles.input}
-                value={orderForm.price}
-                onChange={(e) =>
-                  setOrderForm((prev) => ({ ...prev, price: e.target.value }))
-                }
-                placeholder="0"
-              />
-            </div>
-
-            <div style={styles.fieldBlock}>
-              <label style={styles.label}>Advance</label>
-              <input
-                style={styles.input}
-                value={orderForm.advance}
-                onChange={(e) =>
-                  setOrderForm((prev) => ({ ...prev, advance: e.target.value }))
-                }
-                placeholder="0"
-              />
-            </div>
-          </div>
-
-          <div style={styles.fieldBlock}>
-            <label style={styles.label}>Notes</label>
-            <textarea
-              style={styles.textarea}
-              value={orderForm.notes}
-              onChange={(e) =>
-                setOrderForm((prev) => ({ ...prev, notes: e.target.value }))
-              }
-              placeholder="Note ordine"
-            />
-          </div>
-
-          <button
-            style={{
-              ...styles.buttonDark,
-              width: isMobile ? "100%" : "auto",
-              opacity: savingOrder ? 0.7 : 1,
-            }}
-            onClick={() => void saveOrder()}
-            disabled={savingOrder}
-          >
-            {savingOrder ? "Salvataggio..." : "Salva ordine"}
-          </button>
-        </div>
-
-        <div style={styles.panel}>
-          <h2 style={styles.panelTitle}>Ordini</h2>
           <div style={styles.list}>
             {orders.length === 0 ? (
               <div style={styles.muted}>Nessun elemento disponibile.</div>
             ) : (
-              orders.map((order, idx) => (
-                <div key={String(order.id ?? idx)} style={styles.clientItem}>
-                  <div style={styles.rowBetween}>
-                    <div>
-                      <div style={{ fontWeight: 700, marginBottom: 6 }}>
-                        {String(order.garment || `Ordine #${idx + 1}`)}
+              orders.map((order, idx) => {
+                const active = selectedOrder?.id === order.id;
+                return (
+                  <div
+                    key={String(order.id ?? idx)}
+                    style={active ? styles.clientItemActive : styles.clientItem}
+                    onClick={() => openOrder(order)}
+                  >
+                    <div style={styles.rowBetween}>
+                      <div>
+                        <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                          {String(order.garment || `Ordine #${idx + 1}`)}
+                        </div>
+                        <div style={styles.helper}>
+                          {clientNameById(order.client_id)} · {String(order.status || "Aperto")}
+                        </div>
+                        <div style={{ ...styles.helper, marginTop: 6 }}>
+                          {euro(Number(order.price ?? 0))} · Acconto {euro(Number(order.advance ?? 0))}
+                        </div>
                       </div>
-                      <div style={styles.helper}>
-                        {clientNameById(order.client_id)} · {String(order.status || "Aperto")}
-                      </div>
-                      <div style={{ ...styles.helper, marginTop: 6 }}>
-                        {euro(Number(order.price ?? 0))} · Acconto {euro(Number(order.advance ?? 0))}
-                      </div>
-                    </div>
 
-                    <button
-                      style={styles.buttonDanger}
-                      onClick={() => void deleteOrder(order.id)}
-                    >
-                      {deletingOrderId === order.id ? "Elimino..." : "Elimina"}
-                    </button>
+                      <button
+                        style={styles.buttonDanger}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void deleteOrder(order.id);
+                        }}
+                      >
+                        {deletingOrderId === order.id ? "Elimino..." : "Elimina"}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
+
+        {renderOrderEditor()}
       </div>
     );
   }
